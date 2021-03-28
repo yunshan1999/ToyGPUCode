@@ -14,13 +14,12 @@ pandax4t_signal_sim = """
 #include <thrust/device_vector.h>
 extern "C" {
 
-__device__ float gpu_truncated_gaussian(curandState_t *rand_state, float mean, float sigma, float lower, float upper)
+        __device__ float gpu_truncated_gaussian(curandState_t *rand_state, float mean, float sigma, float lower, float upper)
 {
-    float x = mean;
-    for(int i=0;i<1e2;i++)
+    float x = lower;
+    while(x>=upper||x<=lower)
     {
         x = curand_normal(rand_state)*sigma + mean;
-        if (x<upper && x>lower) break;
     }
     return x;
 }
@@ -153,7 +152,7 @@ __device__ float get_g1_true(float dt, float g1mean){
     return g1_true;
 }
 
-__device__ int get_s1_efficiency(curandState_t *rand_state, int nHitsS1){
+__device__ float get_s1_efficiency(int nHitsS1){
     float hit[] = {20, 
                     1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
                     11, 12, 13, 14, 15, 16, 17, 18, 19, 20 };
@@ -165,10 +164,8 @@ __device__ int get_s1_efficiency(curandState_t *rand_state, int nHitsS1){
                     0.9534351145038169,0.9534351145038169,0.9603053435114505,
                     0.9648854961832063,0.9717557251908397,0.9763358778625955
                     };
-    float dice = curand_uniform(rand_state);
-    float Eff =  interpolate1d((float)nHitsS1, hit, eff);
-    if(dice<Eff)return 1;
-    else return 0;
+    float Eff = interpolate1d((float)nHitsS1, hit, eff);
+    return Eff;
 }
 
 __device__ void get_bls(float pulseAreaS1, float * bias, float * fluctuation){
@@ -216,7 +213,11 @@ __device__ float get_g2_inverse_correction_factor(float dt, float eLife_us){
     return expf(dt/eLife_us);
 }
 
-__global__ void signal_simulation(int *seed, int *input, float *output)
+__global__ void signal_simulation(
+        int *seed,
+        int *input,
+        float *nuisance_par,
+        float *output)
 {
     // initiate the random sampler, must have.
     int iteration = blockIdx.x * blockDim.x * blockDim.y + threadIdx.y * blockDim.x + threadIdx.x;
@@ -235,7 +236,7 @@ __global__ void signal_simulation(int *seed, int *input, float *output)
     //printf("This is the %d-th GPU thread!\\n", iteration);
     //return;
 
-    //to determine whether it's ER or NR
+    //to determine whether it is ER or NR
     bool simuTypeNR = false;
 
     //get energy randomly(just for test, a flat ER spectrum below 10keV)
@@ -243,21 +244,22 @@ __global__ void signal_simulation(int *seed, int *input, float *output)
 
     //get detector parameters
 
-    float g1 = 0.09997;        //hit per photon
-    float sPEres = 0.3;        //pmt single phe resolution (gaussian assumed)
-    float P_dphe = 0.2;        //probab that 1 phd makes 2nd phe 
-    float SEG = 28.;           //single electron gain, num of photon/electron 
-                                //before elife decay&EEE
-    float g2 = 5.09017 * 4;    //phd/electron
-    float ExtraEff = g2 / SEG; //electron extraction eff
-    float deltaG = SEG * 0.25; //SEG resolution
-    //float s2_thr = 80.;        //s2 threshold in phe
-    float E_drift = 114.2;     //drift electric field in V/cm
-    float eLife_us = 600.;     //the drift electron in microsecond
-    float driftvelocity = 1.37824;//in mm/microsecond
-    float density = 2.8611 ;   //density of liquid xenon
-    float TopDrift = 1200.;    // mm 
-    float w_eV = 13.7;         //average energy of each quanta in eV
+    float g1 = nuisance_par[0]; //hit per photon
+    float sPEres = nuisance_par[1]; //pmt single phe resolution (gaussian assumed)
+    float P_dphe = nuisance_par[2]; //probab that 1 phd makes 2nd phe 
+    float SEG = nuisance_par[3]; //single electron gain, num of photon/electron 
+                                        //before elife decay&EEE
+    float g2 = nuisance_par[4]; //phd/electron
+    float ExtraEff = nuisance_par[5]; //electron extraction eff
+    float deltaG = nuisance_par[6]; //SEG resolution
+    float eLife_us = nuisance_par[7]; //the drift electron in microsecond
+    
+    //float s2_thr = 80.; //s2 threshold in phe
+    float E_drift = 114.2; //drift electric field in V/cm
+    float driftvelocity = 1.37824; //in mm/microsecond
+    float density = 2.8611; //density of liquid xenon
+    float TopDrift = 1200.; // mm 
+    float w_eV = 13.7; //average energy of each quanta in eV
 
     //let the simulation begins
 
@@ -266,22 +268,27 @@ __global__ void signal_simulation(int *seed, int *input, float *output)
 
     // 2) get actual quanta number by fluctuating quanta number with fano factor
     float Fano = get_fano_factor(simuTypeNR, density, Nq_mean, E_drift);
-    int Nq_actual = (int) gpu_truncated_gaussian(&s, Nq_mean, sqrtf(Fano * Nq_mean), -1e9, 1e9);
-    
+    int Nq_actual = (int)(curand_normal(&s)*sqrtf(Fano * Nq_mean) + Nq_mean);
+    if(Nq_actual <= 0. )return;
+
     // 3) get quanta number after lindhard factor fluctuation
     float L = get_lindhard_factor(simuTypeNR, energy);
     int Nq = gpu_binomial(&s, Nq_actual, L);
+    if(Nq <= 0.)return;
 
     // 4）get exciton ratio and do fluctuation
     float NexONi = get_exciton_ratio(simuTypeNR, E_drift, energy, density);
+    if(NexONi < 0.||NexONi > 1.)printf("error in NexONi");
     int Ni = gpu_binomial(&s, Nq, 1/(1 +NexONi));
     int Nex = Nq - Ni;
 
     // 5) get recomb fraction fluctuation
     float rmean = get_recomb_frac(simuTypeNR, E_drift, Ni, energy);
     float deltaR = get_recomb_frac_delta(energy);
-    float r = gpu_truncated_gaussian(&s, rmean, deltaR, 0, 1);
-
+    float r = curand_normal(&s)*deltaR + rmean;
+    if(r >= 1. )r = 1.;
+    else if(r <= 0.)r = 0.;
+    
     // 6) get photon and electron numbers
     int Ne = gpu_binomial(&s, Ni, 1 - r);
     int Nph = Ni + Nex - Ne;
@@ -293,57 +300,74 @@ __global__ void signal_simulation(int *seed, int *input, float *output)
     // 8) get g1 hit(phd) number
     float g1_true = get_g1_true(dt,g1);
     int nHitsS1 = gpu_binomial(&s, Nph, g1_true);
+    if(nHitsS1 <= 0.)return;
     
-    // 9) get effective s1 hit(after introducing s1 efficiency)
-    int effS1 = get_s1_efficiency(&s, nHitsS1);//return 0 or 1
-    int nHitsS1Eff = nHitsS1 * effS1;
-
-    // 10) get s1 in phe #, consider float phe
-    int NpheS1 = nHitsS1Eff + gpu_binomial(&s, nHitsS1Eff, P_dphe);
-
-    // 11) s1 pulse area, with pmt resolution
-    float pulseAreaS1 = gpu_truncated_gaussian(&s, NpheS1, sqrtf(NpheS1) * sPEres, 0, 1e9);
-
-    // 12) biased s1 pulse area (same in s2 bias)
+    // 9) get s1 in phe #, consider float phe
+    int NpheS1 = nHitsS1 + gpu_binomial(&s, nHitsS1, P_dphe);
+    
+    // 10) s1 pulse area, with pmt resolution
+    float pulseAreaS1 = curand_normal(&s)*sqrtf(NpheS1)*sPEres + NpheS1;
+    if(pulseAreaS1 <= 0.)return;
+    
+    // 11) biased s1 pulse area (same in s2 bias)
     float biasS1, fluctuationS1;
     get_bls(pulseAreaS1, &biasS1, &fluctuationS1);
-    float pulseAreaBiasS1 = pulseAreaS1 * gpu_truncated_gaussian(&s, biasS1, fluctuationS1, -1e9, 1e9);
-
-    // 13) corrected s1 pulse area
+    float pulseAreaBiasS1 = pulseAreaS1 * (curand_normal(&s)*fluctuationS1 + biasS1);
+    if(pulseAreaBiasS1 <= 0.)return;
+    
+    // 12) corrected s1 pulse area
     float InversedS1Correction = get_g1_inverse_correction_factor(dt);
     float pulseAreaS1Cor = pulseAreaBiasS1 * InversedS1Correction;
+    if(pulseAreaS1Cor <= 0.)return;
 
-    // 14) do electron drifting and extraction
+    // 13) do electron drifting and extraction
     int Nee = gpu_binomial(&s, Ne, expf(-dt / eLife_us) * ExtraEff);
 
-    // 15) get s2 hit number 
-    int nHitsS2 = gpu_truncated_gaussian(&s, SEG * (float)Nee, sqrtf((float)Nee) * deltaG, 0, 1e9);
-    
-    // 16) get s2 phe
+    // 14) get s2 hit number 
+    int nHitsS2 = (int)curand_normal(&s)*sqrtf((float)Nee)*deltaG + SEG*(float)Nee;
+    if(nHitsS2 <= 0.)return;
+
+    // 15) get s2 phe
     int NpheS2 = nHitsS2 + gpu_binomial(&s, nHitsS2, P_dphe);
 
-    // 17) s2 pulse area, with pmt resolution
-    float pulseAreaS2 = gpu_truncated_gaussian(&s, NpheS2, sqrtf(NpheS2) * sPEres, 0, 1e9);
+    // 16) s2 pulse area, with pmt resolution
+    float pulseAreaS2 = curand_normal(&s)*sqrtf(NpheS2)*sPEres + NpheS2; 
+    if(pulseAreaS2 <= 0.)return;
 
-    // 18) biased s2 pulse area 
+    // 17) biased s2 pulse area 
     float biasS2, fluctuationS2;
     get_bls(pulseAreaS2, &biasS2, &fluctuationS2);
-    float pulseAreaBiasS2 = pulseAreaS2 * gpu_truncated_gaussian(&s, biasS2, fluctuationS2, -1e9, 1e9);
+    float pulseAreaBiasS2 = pulseAreaS2 * (curand_normal(&s)*fluctuationS2 + biasS2);
+    if(pulseAreaBiasS2 <=0.)return;
 
-    // 19）corrected s2 pulse area
+    // 18）corrected s2 pulse area
     float InversedS2Correction = get_g2_inverse_correction_factor(dt, eLife_us);
     float pulseAreaS2Cor = pulseAreaBiasS2 * InversedS2Correction;    
+    if(pulseAreaS2Cor <= 0.)return;
     
-    //if(pulseAreaS1Cor>0.&&pulseAreaS2Cor>0.){
-      // printf("cS1 = %f, cS2 = %f", pulseAreaS1Cor, pulseAreaS2Cor);
-    //}
+    // to get the histogram settings
+    int xBinning = (int)*(input+1);
+    float xMin = (float)*(input+2);
+    float xMax = (float)*(input+3);
+    float xStep = (xMax - xMin)/(float)xBinning;
+    int yBinning = (int)*(input+4);
+    float yMin = (float)*(input+5);
+    float yMax = (float)*(input+6);
+    float yStep = (yMax - yMin)/(float)yBinning;
 
-    output[0] = (float)num_trials;
-    output[iteration * 2 + 1] = pulseAreaS1Cor;
-    output[iteration * 2 + 2] = pulseAreaS2Cor;
+    output[0] += 1.;
+
+    //find the bin number and fill it with s1 hit efficiency from xenon result
+    if(pulseAreaS1Cor<0.||pulseAreaS2Cor<0.)return;
+    float xvalue = (float)pulseAreaS1Cor;
+    float yvalue = (float)log10f(pulseAreaS2Cor/pulseAreaS1Cor);
+    int xbin = (int) (xvalue - xMin)/xStep + 1;
+    int ybin = (int) (yvalue - yMin)/yStep + 1;
+    float weight = get_s1_efficiency(nHitsS1);
+
+    *(output+(ybin-1)*xBinning+xbin) += weight;
+    
 }
-
 }
-
 
 """
