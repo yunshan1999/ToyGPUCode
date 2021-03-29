@@ -345,7 +345,8 @@ __global__ void signal_simulation(
     float pulseAreaS2Cor = pulseAreaBiasS2 * InversedS2Correction;    
     if(pulseAreaS2Cor <= 0.)return;
     
-    // to get the histogram settings
+
+   // to get the histogram settings
     int xBinning = (int)*(input+1);
     float xMin = (float)*(input+2);
     float xMax = (float)*(input+3);
@@ -356,17 +357,29 @@ __global__ void signal_simulation(
     float yStep = (yMax - yMin)/(float)yBinning;
 
     output[0] += 1.;
-
-    //find the bin number and fill it with s1 hit efficiency from xenon result
-    if(pulseAreaS1Cor<0.||pulseAreaS2Cor<0.)return;
+    //get values, overflows and underflows in output[1]-output[9]
     float xvalue = (float)pulseAreaS1Cor;
     float yvalue = (float)log10f(pulseAreaS2Cor/pulseAreaS1Cor);
-    int xbin = (int) (xvalue - xMin)/xStep + 1;
-    int ybin = (int) (yvalue - yMin)/yStep + 1;
-    float weight = get_s1_efficiency(nHitsS1);
-
-    *(output+(ybin-1)*xBinning+xbin) += weight;
     
+    if(xvalue<xMin && yvalue>=yMax)output[1] += 1.;
+    else if(xvalue>xMin && xvalue<xMax && yvalue>=yMax)output[2] += 1.;
+    else if(xvalue>=xMax && yvalue>=yMax)output[3] += 1.;
+    else if(xvalue<xMin && yvalue>yMin && yvalue<yMax)output[4] += 1.;
+    else if(xvalue>=xMin && xvalue<xMax && yvalue>=yMin && yvalue<yMax)
+    {
+        output[5] += 1.;
+        int xbin = (int) ((xvalue - xMin)/xStep) + 1;
+        int ybin = (int) ((yvalue - yMin)/yStep) + 1;
+        float weight = get_s1_efficiency(nHitsS1);
+        if(weight<0.)weight = 0.;
+
+        *(output+9+(ybin-1)*xBinning+xbin) += weight;
+    }
+    else if(xvalue>=xMax && yvalue>yMin && yvalue<yMax)output[6] += 1.;
+    else if(xvalue<xMin && yvalue<yMin)output[7] += 1.;
+    else if(xvalue>xMin && xvalue<xMax && yvalue<yMin)output[8] += 1.;
+    else if(xvalue>=xMax && yvalue<yMin)output[9] += 1.;
+
 }
 }
 

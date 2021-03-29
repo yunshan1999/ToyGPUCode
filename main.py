@@ -41,11 +41,10 @@ GPUFunc     = SourceModule(pandax4t_signal_sim, no_extern_c=True).get_function("
 
 # define a input array under cpu level
 gpu_seed            = int(time.time()*100)
-num_trials          = 128 * 2  # for example we print out 1024 * 1024 GPU nodes
-
+num_trials          = 4 * 1024 * 1024 
 GPUSeed             = np.asarray(gpu_seed, dtype=np.int32)
 input_array         = np.asarray([num_trials, 100, 0., 50., 100., 0., 5.], dtype=np.int32)
-output_array        = np.zeros(1+100*100, dtype=np.float32)
+output_array        = np.zeros(1 + 9 +100*100, dtype=np.float32)
 nuisance_par_array = np.asarray([0.09997, 0.3, 0.2, 28., 5.09017 * 4, 0.72717, 7., 600.], dtype=np.float32)
 
 # important step, need to push (or copy) it to GPU memory so that GPU function can use it
@@ -79,17 +78,18 @@ secs = start.time_till(end)*1e-3
 #run_time = time.time() - start_time
 
 print("GPU run time %f seconds " % secs)
-print(output_array)
+print(output_array[0:10])
 
+np.savetxt("./outputs/outputs1.txt",output_array)
 # decode the output array to get shape hist
 
-hist_array = output_array[0:-1]
-xbin = int(input_array[1])
-xmin = input_array[2]
-xmax = input_array[3]
-ybin = int(input_array[4])
-ymin = input_array[5]
-ymax = input_array[6]
-hist_array = hist_array.reshape(ybin, xbin)
-plt.pcolor(hist_array)
-plt.show()
+#hist_array = output_array[0:-1]
+#xbin = int(input_array[1])
+#xmin = input_array[2]
+#xmax = input_array[3]
+#ybin = int(input_array[4])
+#ymin = input_array[5]
+#ymax = input_array[6]
+#hist_array = hist_array.reshape(ybin, xbin)
+#plt.pcolor(hist_array)
+#plt.savefig("./outputs/hist.pdf")
