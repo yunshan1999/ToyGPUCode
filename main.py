@@ -17,7 +17,7 @@ except ImportError:
     )
 
 
-from gpu_modules.TestSignalSimCuda import pandax4t_signal_sim
+from gpu_modules.TestRandom import random_test
 
 #########################################
 ## Initialization
@@ -29,7 +29,7 @@ from gpu_modules.TestSignalSimCuda import pandax4t_signal_sim
 start = drv.Event()
 end = drv.Event()
 
-GPUFunc     = SourceModule(pandax4t_signal_sim, no_extern_c=True).get_function("signal_simulation")
+GPUFunc     = SourceModule(random_test, no_extern_c=True).get_function("random_simulation")
 
 
 
@@ -41,18 +41,18 @@ GPUFunc     = SourceModule(pandax4t_signal_sim, no_extern_c=True).get_function("
 
 # define a input array under cpu level
 gpu_seed            = int(time.time()*100)
-num_trials          = 4 * 1024 * 1024 
+num_trials          = 1024 * 1024  
 GPUSeed             = np.asarray(gpu_seed, dtype=np.int32)
-input_array         = np.asarray([num_trials, 100, 0., 50., 100., 0., 5.], dtype=np.int32)
-output_array        = np.zeros(1 + 9 +100*100, dtype=np.float32)
-nuisance_par_array = np.asarray([0.09997, 0.3, 0.2, 28., 5.09017 * 4, 0.72717, 7., 600.], dtype=np.float32)
+input_array         = np.asarray([num_trials, 100, 0., 50., 100., 0.5, 4.], dtype=np.float32)
+output_array        = np.zeros(num_trials, dtype=np.float32)
+#nuisance_par_array = np.asarray([0.09997, 0.3, 0.2, 28., 5.09017 * 4, 0.72717, 7., 600.], dtype=np.float32)
 
 # important step, need to push (or copy) it to GPU memory so that GPU function can use it
 # this step take time so shall minimize the number of times calling it
 tArgs               = [
     drv.In(GPUSeed),
     drv.In(input_array),
-    drv.In(nuisance_par_array),
+ #   drv.In(nuisance_par_array),
     drv.InOut(output_array)
 ]
 
@@ -68,19 +68,18 @@ d_gpu_scale['grid'] = (int(numBlocks), 1)
 
 # Run the GPU code
 #start_time = time.time()
-start.record()
+#start.record()
 GPUFunc(*tArgs, **d_gpu_scale)
-end.record() # end timing
+#end.record() # end timing
 # calculate the run length
-end.synchronize()
-secs = start.time_till(end)*1e-3
+#end.synchronize()
+#secs = start.time_till(end)*1e-3
 #gpuContext.pop() #finish
 #run_time = time.time() - start_time
-
-print("GPU run time %f seconds " % secs)
-print(output_array[0:10])
-
-np.savetxt("./outputs/outputs1.txt",output_array)
+#print("GPU run time %f seconds " % secs)
+np.savetxt("./outputs/outputs_gpu.dat",output_array)
+time.sleep(5)
+np.savetxt("./outputs/outputs_gpu_sleep.dat",output_array)
 # decode the output array to get shape hist
 
 #hist_array = output_array[0:-1]
