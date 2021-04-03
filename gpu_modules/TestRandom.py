@@ -30,7 +30,7 @@ __global__ void random_simulation(int *seed, float *input, float *output)
     curand_init((*seed)* iteration, 0, 0, &s);
 
     // get the number of trials
-    int num_trials      = (float)input[0];
+    int num_trials      = (int)input[0];
 
     //printf("number of trials = %d", num_trials);
 
