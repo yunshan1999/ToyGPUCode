@@ -38,12 +38,12 @@ __global__ void random_simulation(int *seed, float *input, float *output)
     if (iteration>num_trials) return;
 
     float First = curand_uniform(&s);
-    //float Second = first(&s);
-    //float Third = second(&s);
+    float Second = first(&s);
+    float Third = second(&s);
 
     atomicAdd(&output[iteration],(float)First);
-   // atomicAdd(&output[iteration+num_trials],(float)Second);
-   // atomicAdd(&output[iteration+2*num_trials],(float)Third);
+    atomicAdd(&output[iteration+num_trials],(float)Second);
+    atomicAdd(&output[iteration+2*num_trials],(float)Third);
 
 }
 }
