@@ -1,6 +1,3 @@
-##############################################
-## Simple code for Yunshan
-##############################################
 import numpy as np
 import time
 import matplotlib.pyplot as plt
@@ -79,15 +76,4 @@ run_time = time.time() - start_time
 print("GPU run time %f seconds " % secs)
 np.savetxt("./outputs/outputs_gpu.dat",output_array)
 #time.sleep(5)
-# decode the output array to get shape hist
 
-#hist_array = output_array[0:-1]
-#xbin = int(input_array[1])
-#xmin = input_array[2]
-#xmax = input_array[3]
-#ybin = int(input_array[4])
-#ymin = input_array[5]
-#ymax = input_array[6]
-#hist_array = hist_array.reshape(ybin, xbin)
-#plt.pcolor(hist_array)
-#plt.savefig("./outputs/hist.pdf")

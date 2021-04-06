@@ -2,9 +2,9 @@
 # Signal simulation details shall be written here!
 # this currently is just a test and demonstration!
 # #############################################################
-# Created @ 2021-03-16
-# by Qing Lin
-# email: qinglin@ustc.edu.cn
+# Created @ 2021-04-05
+# by Yunshan Cheng
+# email: yunshancheng1@gmail.com
 ###############################################################
 
 pandax4t_signal_sim = """
