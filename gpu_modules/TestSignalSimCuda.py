@@ -13,7 +13,41 @@ pandax4t_signal_sim = """
 #include <math.h>
 #include <thrust/device_vector.h>
 extern "C" {
+__device__ float curand_uniform_1stcall(curandState_t *rand_state){
+    float rand = curand_uniform(rand_state);
+    return rand;
+}
 
+__device__ float curand_uniform_2ndcall(curandState_t *rand_state){
+    float rand0 = curand_uniform(rand_state);
+    float rand1 = curand_uniform_1stcall(rand_state);
+    return rand1;
+}
+
+__device__ float curand_uniform_3rdcall(curandState_t *rand_state){
+    float rand0 = curand_uniform(rand_state);
+    float rand1 = curand_uniform_1stcall(rand_state);
+    float rand2 = curand_uniform_2ndcall(rand_state);
+    return rand2;
+}
+
+__device__ float curand_normal_1stcall(curandState_t *rand_state){
+    float rand = curand_normal(rand_state);
+    return rand;
+}
+
+__device__ float curand_normal_2ndcall(curandState_t *rand_state){
+    float rand0 = curand_normal(rand_state);
+    float rand1 = curand_normal_1stcall(rand_state);
+    return rand1;
+}
+
+__device__ float curand_normal_3rdcall(curandState_t *rand_state){
+    float rand0 = curand_normal(rand_state);
+    float rand1 = curand_normal_1stcall(rand_state);
+    float rand2 = curand_normal_2ndcall(rand_state);
+    return rand2;
+}
         __device__ float gpu_truncated_gaussian(curandState_t *rand_state, float mean, float sigma, float lower, float upper)
 {
     float x = lower;
@@ -72,10 +106,7 @@ __device__ float interpolate1d(float x, float * array_x, float * array_y){
 
     }
 }
-__device__ float get_recoil_energy(curandState_t *rand_state, float EnergyLower, float EnergyUpper){
-    float RecoilEnergy = curand_uniform(rand_state)*(EnergyUpper - EnergyLower) + EnergyLower;
-    return RecoilEnergy;
-}
+
 __device__ float get_er_energy_weight(float energy){
 
     float Energy[] = {6,
@@ -272,7 +303,7 @@ __global__ void signal_simulation(
     // initiate the random sampler, must have.
     int iteration = blockIdx.x * blockDim.x * blockDim.y + threadIdx.y * blockDim.x + threadIdx.x;
     curandState s;
-    curand_init((*seed)* iteration, 0, 0, &s);
+    curand_init((*seed)*iteration,2, 0, &s);
     
     // get the number of trials
     int num_trials      = (int) input[0];
@@ -287,18 +318,16 @@ __global__ void signal_simulation(
     //return;
 
     //to determine whether it is ER or NR
-    bool simuTypeNR = true;
+    bool simuTypeNR = false;
 
     //get energy randomly
     float lower = 0.;
-    float upper = 50.;
-
-    float energy = get_recoil_energy(&s, lower, upper);
-    float test = get_recoil_energy(&s, 0.,1.);
-    float weight = get_nr_energy_weight(energy);
-    if(weight<=0.)weight = 0.;
-    atomicAdd(&output[iteration],(float)test);
-    //atomicAdd(&output[iteration+num_trials],(float)weight);
+    float upper = 10.;
+    
+    float energy = curand_uniform(&s)*(upper-lower)+lower;
+    float weight = get_er_energy_weight(energy);
+    //if(weight<=0.)weight = 0.;
+    
     //get detector parameters
 
     float g1 = nuisance_par[0]; //hit per photon
@@ -322,17 +351,17 @@ __global__ void signal_simulation(
 
     // 1) get mean quanta number
     int Nq_mean = (int)(energy / w_eV * 1000.);
-
+    
     // 2) get actual quanta number by fluctuating quanta number with fano factor
     float Fano = get_fano_factor(simuTypeNR, density, Nq_mean, E_drift);
     int Nq_actual = (int)(curand_normal(&s)*sqrtf(Fano * Nq_mean) + Nq_mean);
     if(Nq_actual <= 0. )Nq_actual = 0.;
-
+    
     // 3) get quanta number after lindhard factor fluctuation
     float L = get_lindhard_factor(simuTypeNR, energy);
     int Nq = gpu_binomial(&s, Nq_actual, L);
     if(Nq <= 0.)Nq = 0.;
-
+    
     // 4）get exciton ratio and do fluctuation
     float NexONi = get_exciton_ratio(simuTypeNR, E_drift, energy, density);
     if(NexONi < 0.||NexONi > 1.)printf("error in NexONi");
@@ -345,11 +374,11 @@ __global__ void signal_simulation(
     float r = curand_normal(&s)*deltaR + rmean;
     if(r >= 1. )r = 1.;
     else if(r <= 0.)r = 0.;
-    
+
     // 6) get photon and electron numbers
     int Ne = gpu_binomial(&s, Ni, 1 - r);
     int Nph = Ni + Nex - Ne;
-    
+
     // 7) get drift time 
     float truthz = curand_uniform(&s) * TopDrift;
     float dt = (TopDrift - truthz) / driftvelocity;
@@ -359,7 +388,7 @@ __global__ void signal_simulation(
     int nHitsS1 = gpu_binomial(&s, Nph, g1_true);
     //if(nHitsS1 <= 0.)return;
     if(nHitsS1 <= 0.)nHitsS1 = 0.;
-
+    
     // 9) get s1 in phe #, consider float phe
     int NpheS1 = nHitsS1 + gpu_binomial(&s, nHitsS1, P_dphe);
     
@@ -385,13 +414,13 @@ __global__ void signal_simulation(
     int Nee = gpu_binomial(&s, Ne, expf(-dt / eLife_us) * ExtraEff);
 
     // 14) get s2 hit number 
-    int nHitsS2 = (int)curand_normal(&s)*sqrtf((float)Nee)*deltaG + SEG*(float)Nee;
+    int nHitsS2 = (int)(curand_normal(&s)*sqrtf((float)Nee)*deltaG + SEG*(float)Nee);
     //if(nHitsS2 <= 0.)return;
     if(nHitsS2 <= 0.)nHitsS2 = 0.;
 
     // 15) get s2 phe
     int NpheS2 = nHitsS2 + gpu_binomial(&s, nHitsS2, P_dphe);
-
+    
     // 16) s2 pulse area, with pmt resolution
     float pulseAreaS2 = curand_normal(&s)*sqrtf(NpheS2)*sPEres + NpheS2; 
     //if(pulseAreaS2 <= 0.)return;
@@ -409,17 +438,9 @@ __global__ void signal_simulation(
     float pulseAreaS2Cor = pulseAreaBiasS2 * InversedS2Correction;    
     //if(pulseAreaS2Cor <= 0.)return;
     if(pulseAreaS2Cor <= 0.)pulseAreaS2Cor = 0.;
-
-    //if(pulseAreaS1Cor <= 0.||pulseAreaS2Cor <= 0.)return;
+  
+    if(pulseAreaS1Cor <= 0.||pulseAreaS2Cor <= 0.)return;
     
-    weight *= get_s1_efficiency(nHitsS1);
-    if(weight<0.){weight = 0.;}
-    //atomicAdd(&output[iteration],(float)energy);
-    //atomicAdd(&output[iteration+num_trials],(float)weight);
-    //atomicAdd(&output[iteration+2*num_trials],weight);
-
-   // to get the histogram settings
-    /*
     int xBinning = (int)*(input+1);
     float xMin = (float)*(input+2);
     float xMax = (float)*(input+3);
@@ -454,7 +475,6 @@ __global__ void signal_simulation(
     else if(xvalue<xMin && yvalue<yMin)atomicAdd(&output[7], 1.);
     else if(xvalue>xMin && xvalue<xMax && yvalue<yMin)atomicAdd(&output[8], 1.);
     else if(xvalue>=xMax && yvalue<yMin)atomicAdd(&output[9], 1.);
-    */
 }
 }
 
