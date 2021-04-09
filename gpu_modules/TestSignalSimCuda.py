@@ -13,42 +13,7 @@ pandax4t_signal_sim = """
 #include <math.h>
 #include <thrust/device_vector.h>
 extern "C" {
-__device__ float curand_uniform_1stcall(curandState_t *rand_state){
-    float rand = curand_uniform(rand_state);
-    return rand;
-}
-
-__device__ float curand_uniform_2ndcall(curandState_t *rand_state){
-    float rand0 = curand_uniform(rand_state);
-    float rand1 = curand_uniform_1stcall(rand_state);
-    return rand1;
-}
-
-__device__ float curand_uniform_3rdcall(curandState_t *rand_state){
-    float rand0 = curand_uniform(rand_state);
-    float rand1 = curand_uniform_1stcall(rand_state);
-    float rand2 = curand_uniform_2ndcall(rand_state);
-    return rand2;
-}
-
-__device__ float curand_normal_1stcall(curandState_t *rand_state){
-    float rand = curand_normal(rand_state);
-    return rand;
-}
-
-__device__ float curand_normal_2ndcall(curandState_t *rand_state){
-    float rand0 = curand_normal(rand_state);
-    float rand1 = curand_normal_1stcall(rand_state);
-    return rand1;
-}
-
-__device__ float curand_normal_3rdcall(curandState_t *rand_state){
-    float rand0 = curand_normal(rand_state);
-    float rand1 = curand_normal_1stcall(rand_state);
-    float rand2 = curand_normal_2ndcall(rand_state);
-    return rand2;
-}
-        __device__ float gpu_truncated_gaussian(curandState_t *rand_state, float mean, float sigma, float lower, float upper)
+__device__ float gpu_truncated_gaussian(curandState_t *rand_state, float mean, float sigma, float lower, float upper)
 {
     float x = lower;
     while(x>=upper||x<=lower)
@@ -181,11 +146,31 @@ __device__ float get_lindhard_factor(bool simuTypeNR, float energy){
 
 __device__ float get_exciton_ratio(bool simuTypeNR, float E_drift, float energy, float density){
     if(simuTypeNR){
+        /*This is the NEST1 parameterization
         float epsilon = 11.5 * energy * powf(54, -7./3.);
         float alpha = 1.24;
         float zeta = 0.0472;
         float beta = 239.;
         float NexONi = alpha * powf(E_drift,-zeta) * (1 - expf(-beta * epsilon));
+        return NexONi;*/
+        
+        float NuisParam[11] = {11.,1.1,0.0480,-0.0533,12.6,0.3,2.,0.3,2.,0.5,1.};
+        float Nq = NuisParam[0] * powf(energy, NuisParam[1]);
+        float ThomasImel =
+            NuisParam[2] * powf(E_drift, NuisParam[3]) * powf(density / 2.90, 0.3);
+        float Qy = 1. / (ThomasImel*powf(energy+NuisParam[4],NuisParam[9]));
+        Qy *= 1. - 1. / powf(1. + powf((energy / NuisParam[5]), NuisParam[6]),NuisParam[10]);
+        float Ly = Nq / energy - Qy;
+        if (Qy < 0.0) Qy = 0.0;
+        if (Ly < 0.0) Ly = 0.0;
+        float Ne = Qy * energy;
+        float Nph = Ly * energy *
+              (1. - 1. / (1. + powf((energy / NuisParam[7]), NuisParam[8])));
+        Nq = Nph + Ne;
+        float Ni = (4. / ThomasImel) * (expf(Ne * ThomasImel / 4.) - 1.);
+        float Nex = (-1. / ThomasImel) * (4. * expf(Ne * ThomasImel / 4.) -
+                                           (Ne + Nph) * ThomasImel - 4.);
+        float NexONi = Nex / Ni;
         return NexONi;
     }
     else{
@@ -195,7 +180,8 @@ __device__ float get_exciton_ratio(bool simuTypeNR, float E_drift, float energy,
     }
 }
 
-__device__ float get_recomb_frac(bool simuTypeNR, float E_drift, float Ni, float energy){
+__device__ float get_recomb_frac(bool simuTypeNR, float E_drift, float density, float energy){
+    /*old versions in gpu update slide1
     if(simuTypeNR){
         float gamma = 0.01385;
         float delta = 0.0620;
@@ -213,6 +199,64 @@ __device__ float get_recomb_frac(bool simuTypeNR, float E_drift, float Ni, float
         float rmean = (1. - logf(1 + Ni * sigma/4. )/(Ni * sigma/4.))/(1 + expf(-(energy - q0)/q1));
         return rmean;
     }
+    */
+    //follows the way in NEST2.0
+    if(simuTypeNR){
+        float NuisParam[11] = {11.,1.1,0.0480,-0.0533,12.6,0.3,2.,0.3,2.,0.5,1.};
+        float Nq = NuisParam[0] * powf(energy, NuisParam[1]);
+        float ThomasImel =
+            NuisParam[2] * powf(E_drift, NuisParam[3]) * powf(density / 2.90, 0.3);
+        float Qy = 1. / (ThomasImel*powf(energy+NuisParam[4],NuisParam[9]));
+        Qy *= 1. - 1. / powf(1. + powf((energy / NuisParam[5]), NuisParam[6]),NuisParam[10]);
+        float Ly = Nq / energy - Qy;
+        if (Qy < 0.0) Qy = 0.0;
+        if (Ly < 0.0) Ly = 0.0;
+        float Ne = Qy * energy;
+        float Nph = Ly * energy *
+              (1. - 1. / (1. + powf((energy / NuisParam[7]), NuisParam[8])));
+        Nq = Nph + Ne;
+        float Ni = (4. / ThomasImel) * (expf(Ne * ThomasImel / 4.) - 1.);
+        float Nex = (-1. / ThomasImel) * (4. * expf(Ne * ThomasImel / 4.) -
+                                           (Ne + Nph) * ThomasImel - 4.);
+        float rmean = 1. - Ne / Ni;
+        return rmean;
+    }
+    else{
+        float Wq_eV =
+      1.9896 + (20.8 - 1.9896) / (1. + powf(density / 4.0434, 1.4407));
+        float QyLvllowE = 1e3 / Wq_eV + 6.5 * (1. - 1. / (1. + powf(E_drift / 47.408, 1.9851)));
+        float HiFieldQy =
+          1. + 0.4607 / powf(1. + powf(E_drift / 621.74, -2.2717), 53.502);
+        float QyLvlmedE =
+          32.988 -
+          32.988 /
+              (1. + powf(E_drift / (0.026715 * expf(density / 0.33926)), 0.6705));
+      QyLvlmedE *= HiFieldQy;
+        float DokeBirks =
+          1652.264 +
+          (1.415935e10 - 1652.264) / (1. + powf(E_drift / 0.02673144, 1.564691));
+        float Nq = energy * 1e3 /
+                  Wq_eV;  //( Wq_eV+(12.578-Wq_eV)/(1.+powf(energy/1.6,3.5)) );
+        float LET_power = -2.;
+        float QyLvlhighE = 28.;
+      //      if (density > 3.) QyLvlhighE = 49.; Solid Xe effect from Yoo. But,
+      //      beware of enabling this line: enriched liquid Xe for neutrinoless
+      //      double beta decay has density higher than 3g/cc;
+        float Qy = QyLvlmedE +
+                  (QyLvllowE - QyLvlmedE) /
+                      powf(1. + 1.304 * powf(energy, 2.1393), 0.35535) +
+                  QyLvlhighE / (1. + DokeBirks * powf(energy, LET_power));
+        if (Qy > QyLvllowE && energy > 1. && E_drift > 1e4) Qy = QyLvllowE;
+        float Ly = Nq / energy - Qy;
+        float Ne = Qy * energy;
+        float Nph = Ly * energy;
+        float alpha = 0.067366 + density * 0.039693;
+        float NexONi = alpha * erff(0.05 * energy);
+        float Nex = Nq * (NexONi) / (1. + NexONi);
+        float Ni = Nq * 1. / (1. + NexONi);
+        float rmean = 1 - Ne / Ni;
+        return rmean;
+        }
 }
 
 __device__ float get_recomb_frac_delta(float energy){
@@ -318,27 +362,27 @@ __global__ void signal_simulation(
     //return;
 
     //to determine whether it is ER or NR
-    bool simuTypeNR = false;
+    bool simuTypeNR = true;
 
     //get energy randomly
     float lower = 0.;
-    float upper = 10.;
+    float upper = 50.;
     
     float energy = curand_uniform(&s)*(upper-lower)+lower;
-    float weight = get_er_energy_weight(energy);
+    float weight = get_nr_energy_weight(energy);
     //if(weight<=0.)weight = 0.;
     
     //get detector parameters
 
     float g1 = nuisance_par[0]; //hit per photon
-    float sPEres = nuisance_par[1]; //pmt single phe resolution (gaussian assumed)
-    float P_dphe = nuisance_par[2]; //probab that 1 phd makes 2nd phe 
-    float SEG = nuisance_par[3]; //single electron gain, num of photon/electron 
+    float sPEres = 0.3; //pmt single phe resolution (gaussian assumed)
+    float P_dphe = 0.2; //probab that 1 phd makes 2nd phe 
+    float SEG = 28.; //single electron gain, num of photon/electron 
                                         //before elife decay&EEE
-    float g2 = nuisance_par[4]; //phd/electron
-    float ExtraEff = nuisance_par[5]; //electron extraction eff
-    float deltaG = nuisance_par[6]; //SEG resolution
-    float eLife_us = nuisance_par[7]; //the drift electron in microsecond
+    float g2 = nuisance_par[1]; //phd/electron
+    float ExtraEff = g2 / SEG; //electron extraction eff
+    float deltaG = 7.; //SEG resolution
+    float eLife_us = 600.; //the drift electron in microsecond
     
     //float s2_thr = 80.; //s2 threshold in phe
     float E_drift = 114.2; //drift electric field in V/cm
@@ -364,12 +408,11 @@ __global__ void signal_simulation(
     
     // 4）get exciton ratio and do fluctuation
     float NexONi = get_exciton_ratio(simuTypeNR, E_drift, energy, density);
-    if(NexONi < 0.||NexONi > 1.)printf("error in NexONi");
     int Ni = gpu_binomial(&s, Nq, 1/(1 +NexONi));
     int Nex = Nq - Ni;
 
     // 5) get recomb fraction fluctuation
-    float rmean = get_recomb_frac(simuTypeNR, E_drift, Ni, energy);
+    float rmean = get_recomb_frac(simuTypeNR, E_drift, density, energy);
     float deltaR = get_recomb_frac_delta(energy);
     float r = curand_normal(&s)*deltaR + rmean;
     if(r >= 1. )r = 1.;

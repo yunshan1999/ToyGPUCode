@@ -38,11 +38,11 @@ GPUFunc     = SourceModule(pandax4t_signal_sim, no_extern_c=True).get_function("
 
 # define a input array under cpu level
 gpu_seed            = int(time.time()*100)
-num_trials          = 2**19
+num_trials          = 2**27
 GPUSeed             = np.asarray(gpu_seed, dtype=np.int32)
 input_array         = np.asarray([num_trials, 100, 0., 50., 100., 0.5, 4.], dtype=np.float32)
 output_array        = np.zeros(1+9+100*100*2, dtype=np.float32)
-nuisance_par_array = np.asarray([0.09997, 0.3, 0.2, 28., 5.09017 * 4, 0.72717, 7., 600.], dtype=np.float32)
+nuisance_par_array = np.asarray([0.09997, 5.09017 * 4], dtype=np.float32)
 
 # important step, need to push (or copy) it to GPU memory so that GPU function can use it
 # this step take time so shall minimize the number of times calling it
