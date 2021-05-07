@@ -72,19 +72,19 @@ for attri,luRange in config['python3.6']['fittingParSpace'].items():
   a = np.asarray(luRange,dtype=np.float32)
   v_variables = np.append(v_variables,a)
 
-v_variables = v_variables.reshape((rowNo,2))
-print(v_variables)
+best_variable = np.asarray([0.1,0.6584,19.7444,0.28969,0.1361,-0.005718727,1.83,33.7],dtype = np.float32)
+v_variables = np.asarray([best_variable,best_variable])
 
 
 # important step, need to push (or copy) it to GPU memory so that GPU function can use it
 # this step take time so shall minimize the number of times calling it
 const_pars = np.asarray([num_trials,n_elife],dtype=np.float32)
 print(const_pars)
-mode=np.uint(0)
+mode=np.uint(1)
 tArgs               = [
     drv.In(GPUSeed),
     drv.In(const_pars),
-    drv.In(v_variables),
+    drv.In(v_variables.T),
     drv.In(elife),drv.In(elife_duration),
     drv.InOut(output_array),stride_output_array,N_output_array,mode
 ]
@@ -112,7 +112,7 @@ secs = start.time_till(end)*1e-3
 run_time = time.time() - start_time
 print("GPU run time %f seconds " % secs)
 print(output_array[1])
-outputfile = config['python3.6']['files']['oriSimuNpz']
+outputfile = config['python3.6']['files']['oriBestSimuNpz']
 np.savez(outputfile,oriTree=output_array)
 #np.savetxt("./outputs/outputs_gpu.txt",output_array)
 #time.sleep(5)

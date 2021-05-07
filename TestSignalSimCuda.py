@@ -72,69 +72,18 @@ __device__ float interpolate1d(float x, float * array_x, float * array_y){
     }
 }
 
+__device__ float get_tritium_energy_weight(float energy){
 
-__device__ get_tritium_energy_weight(float energy,float *par)
-{
-        float flat=par[0];
-        float T = energy;
-        float Q(18.5906),pi(3.1415926);
-        if (T>Q||T<0)  return flat;
-        float m = 0.511e3;
-        float P = sqrt(2*m*T);
-        float E = T+m;
-        float eta = 2.*1./137*E/P;
-        float F = 2*pi*eta/(1-exp(-2*pi*eta));
-        return float(F*P*E*(Q-T)*(Q-T)*0.00001+flat);
-
-}
-
-
-
-__device__ float get_er_energy_weight(float energy){
-
-    float Energy[] = {6,
-                    7.2067117462943315,
-                    33.92045118998408 ,
-                    53.04914958955885 ,
-                    79.78134412094721 ,
-                    98.85467725742637 ,
-                    121.72053091596308
-                    };
-    float Rate[] = {6,
-                0.04711112624689215,
-                0.050370838075343045,
-                0.057582505387584616,
-                0.06366109318181677,
-                0.06582667776445614,
-                0.06582667776445614
-                };
-    float Weight = interpolate1d(energy, Energy, Rate);
-    return Weight;
-}
-
-__device__ float get_nr_energy_weight(float energy){
-
-    float Energy[] = {25,
-                        0.3643724696356276, 0.9311740890688256,1.4979757085020236,2.145748987854251,
-                        2.793522267206477,3.279352226720647, 3.9271255060728745,4.574898785425098,
-                        5.222672064777328, 5.789473684210527, 6.356275303643727, 6.842105263157894,
-                        7.489878542510123, 8.137651821862349, 8.785425101214575, 12.429149797570851,
-                        15.263157894736839,20.202429149797567,26.194331983805668,30.32388663967611, 
-                        35.4251012145749,  40.445344129554655,45.87044534412956, 50.89068825910931, 
-                        54.93927125506073
-                        };
-                
-    float Rate[] = {25,
-                    0.001348559553052562,0.0005837592378488603, 0.00034077484777388155,0.0002380254399901921,
-                    0.00017130349897073656,0.00013485595530525607,0.00010616320618413007,0.00008611224963143029,
-                    0.00006984830058471098,0.000060147942962818105,0.000050268821214294545,0.00004201231599618962,
-                    0.00003727593720314938,0.000030235661912054828,0.000026826957952797274,0.000010938582306368928,
-                    0.000005665611008252431,0.0000019306977288832498,7.640413849058564e-7,4.2012315996189623e-7,
-                    1.7650346953636906e-7,5.336699231206302e-8,6.014794296281786e-8,3.407748477738809e-8,
-                    1.6625672479242957e-8};
-
-    float Weight = interpolate1d(energy, Energy, Rate);
-    return Weight;
+    float flat = 7.9719; 
+    float T = energy; 
+    float Q = 18.5906, pi = 3.1415926; 
+    if (T > Q||T < 0)return flat; 
+    float m = 0.511e3; 
+    float P = sqrt(2 * m * T);  
+    float E = T + m; 
+    float eta = 2.*1./137*E/P; 
+    float F = 2*pi*eta/(1-exp(-2*pi*eta)); 
+    return double(F * P * E * (Q - T) * (Q - T) * 0.00001 + flat);
 }
 
 __device__ float get_fano_factor(bool simuTypeNR, float density, int Nq_mean, float E_drift){
@@ -143,35 +92,24 @@ __device__ float get_fano_factor(bool simuTypeNR, float density, int Nq_mean, fl
     }
     else{
         float fano = 0.12707 - 0.029623 * density - 0.0057042 * powf(density, 2.)
-        + 0.0015957 * powf(density, 3.); 
+        + 0.0015957 * powf(density, 3.);
         fano += 0.0015 * sqrtf(Nq_mean) * powf(E_drift, 0.5);
         return fano;
     }
 }
 
-__device__ float get_lindhard_factor(bool simuTypeNR, float energy){
-    if(simuTypeNR){
-        float epsilon = 11.5 * energy * powf(54, -7./3.);
-        float g = 3 * powf(epsilon, 0.15) + 0.7 * powf(epsilon, 0.6) + epsilon;
-        float kappa = 0.1394;
-        float L = kappa * g / (1 + kappa * g);
-        return L;
-    }
-    else{
-        return 1.;
-    }
-}
+__device__ void get_yield_pars(bool simuTypeNR, float E_drift, float energy, float density, float * pars, float * free_pars){
+    //This function calculates Lindhaed, W, Nex/Ni, recomb fraction mean and delta and returns them all 
+    //ATTENTION: Just to clarify.NuisParam&FreeParam are NESTv2 Pars, not the ones we are going to fit ni this model. Here we just regard them as intrinsic fixed pars.
 
-__device__ float get_exciton_ratio(bool simuTypeNR, float E_drift, float energy, float density){
+    float nest_avo = 6.0221409e+23;
+    float molar_mass = 131.293;
+    float atom_num = 54.;
+    float eDensity = (density/molar_mass) * nest_avo * atom_num; 
+    float Wq_eV = 18.7263 - 1.01e-23 * eDensity;
+    Wq_eV *= 1.1716263232;
+    
     if(simuTypeNR){
-        /*This is the NEST1 parameterization
-        float epsilon = 11.5 * energy * powf(54, -7./3.);
-        float alpha = 1.24;
-        float zeta = 0.0472;
-        float beta = 239.;
-        float NexONi = alpha * powf(E_drift,-zeta) * (1 - expf(-beta * epsilon));
-        return NexONi;*/
-        
         float NuisParam[11] = {11.,1.1,0.0480,-0.0533,12.6,0.3,2.,0.3,2.,0.5,1.};
         float Nq = NuisParam[0] * powf(energy, NuisParam[1]);
         float ThomasImel =
@@ -188,60 +126,27 @@ __device__ float get_exciton_ratio(bool simuTypeNR, float E_drift, float energy,
         float Ni = (4. / ThomasImel) * (expf(Ne * ThomasImel / 4.) - 1.);
         float Nex = (-1. / ThomasImel) * (4. * expf(Ne * ThomasImel / 4.) -
                                            (Ne + Nph) * ThomasImel - 4.);
+        float elecFrac = Ne/(Ne+Nph);
         float NexONi = Nex / Ni;
-        return NexONi;
-    }
-    else{
-        float alpha = 0.067366 + density * 0.039693;
-        float NexONi = alpha * erff(0.05 * energy);
-        return NexONi;
-    }
-}
-
-__device__ float get_recomb_frac(bool simuTypeNR, float E_drift, float density, float energy){
-    /*old versions in gpu update slide1
-    if(simuTypeNR){
-        float gamma = 0.01385;
-        float delta = 0.0620;
-        float sigma = gamma * powf(E_drift, -delta);
-        float rmean = 1. - logf(1 + Ni * sigma )/(Ni * sigma );
-        return rmean;
-    }
-    else{
-        float gamma = 0.124;
-        float omega = 31.;
-        float delta = 0.24;
-        float q0 = 1.13;
-        float q1 = 0.47;
-        float sigma = gamma * expf(-energy / omega) * powf(E_drift, -delta);
-        float rmean = (1. - logf(1 + Ni * sigma/4. )/(Ni * sigma/4.))/(1 + expf(-(energy - q0)/q1));
-        return rmean;
-    }
-    */
-    //follows the way in NEST2.0
-    if(simuTypeNR){
-        float NuisParam[11] = {11.,1.1,0.0480,-0.0533,12.6,0.3,2.,0.3,2.,0.5,1.};
-        float Nq = NuisParam[0] * powf(energy, NuisParam[1]);
-        float ThomasImel =
-            NuisParam[2] * powf(E_drift, NuisParam[3]) * powf(density / 2.90, 0.3);
-        float Qy = 1. / (ThomasImel*powf(energy+NuisParam[4],NuisParam[9]));
-        Qy *= 1. - 1. / powf(1. + powf((energy / NuisParam[5]), NuisParam[6]),NuisParam[10]);
-        float Ly = Nq / energy - Qy;
-        if (Qy < 0.0) Qy = 0.0;
-        if (Ly < 0.0) Ly = 0.0;
-        float Ne = Qy * energy;
-        float Nph = Ly * energy *
-              (1. - 1. / (1. + powf((energy / NuisParam[7]), NuisParam[8])));
-        Nq = Nph + Ne;
-        float Ni = (4. / ThomasImel) * (expf(Ne * ThomasImel / 4.) - 1.);
-        float Nex = (-1. / ThomasImel) * (4. * expf(Ne * ThomasImel / 4.) -
-                                           (Ne + Nph) * ThomasImel - 4.);
         float rmean = 1. - Ne / Ni;
-        return rmean;
+        float FreeParam[] = {1.,1.,0.1,0.5,0.19,2.25};
+        float omega = FreeParam[2] * expf(-0.5 * powf(elecFrac - FreeParam[3],2.)/(FreeParam[4] * FreeParam[4]));
+        if(omega < 0.)omega = 0.;
+        double L = (Nq / energy) * Wq_eV * 1e-3;
+        pars[0] = Wq_eV;
+        pars[1] = L;
+        pars[2] = NexONi;
+        pars[3] = rmean + free_pars[4] + free_pars[5] * energy;
+        pars[4] = omega * free_pars[3];
+        if(pars[3]<0.)pars[3] = 0.;
+        if(pars[3]>1.)pars[3] = 1.;
+        if(pars[4]<0.)pars[4] = 0.;
+        return;
     }
     else{
-        float Wq_eV =
+        // float Wq_eV =
       1.9896 + (20.8 - 1.9896) / (1. + powf(density / 4.0434, 1.4407));
+
         float QyLvllowE = 1e3 / Wq_eV + 6.5 * (1. - 1. / (1. + powf(E_drift / 47.408, 1.9851)));
         float HiFieldQy =
           1. + 0.4607 / powf(1. + powf(E_drift / 621.74, -2.2717), 53.502);
@@ -273,17 +178,72 @@ __device__ float get_recomb_frac(bool simuTypeNR, float E_drift, float density, 
         float Nex = Nq * (NexONi) / (1. + NexONi);
         float Ni = Nq * 1. / (1. + NexONi);
         float rmean = 1 - Ne / Ni;
-        return rmean;
+        float elecFrac = Ne/(Ne+Nph);
+
+        float ampl = 0.14 + (0.043 - 0.14)/(1. + powf(E_drift/1210.,1.25)); //0.086036+(0.0553-0.086036)/powf(1.+powf(E_drift/295.2,251.6),0.0069114); //pair with GregR mean yields model
+        if(ampl < 0.)ampl = 0.;
+        float wide = 0.205; //or: FreeParam #2, like amplitude (#1)
+        float cntr = 0.5; //0.41-45 agrees better with Dahl thesis. Odd! Reduces fluctuations for high e-Frac (high EF,low E). Also works with GregR LUX Run04 model. FreeParam #3
+        //for gamma-rays larger than 100 keV at least in XENON10 use 0.43 as the best fit. 0.62-0.37 for LUX Run03
+        float skew = -0.2; //FreeParam #4
+        float mode = cntr + sqrtf(2./M_PI)*skew*wide/sqrtf(1.+skew*skew);
+        float norm = 1./(expf(-0.5*powf(mode-cntr,2.)/(wide*wide))*(1.+erff(skew*(mode-cntr)/(wide*sqrtf(2.))))); //makes sure omega never exceeds ampl
+        float omega = norm*ampl*expf(-0.5*powf(elecFrac-cntr,2.)/(wide*wide))*(1.+erff(skew*(elecFrac-cntr)/(wide*sqrtf(2.))));
+        if(omega<0.)omega = 0;
+        pars[0] = Wq_eV;
+        pars[1] = 1.;
+        pars[2] = NexONi;
+        pars[3] = rmean + free_pars[4] + free_pars[5] * energy;
+        pars[4] = omega * free_pars[3];
+        if(pars[3]<0.)pars[3] = 0.;
+        if(pars[3]>1.)pars[3] = 1.;
+        if(pars[4]<0.)pars[4] = 0.;
+        return;
+    }
+}
+
+__device__ float get_elife(curandState_t *rand_state, int typeFlag){
+    //return 600.;
+    
+    //float * elife;
+    //float * duration;
+    //if(typeFlag==0)//tritium
+    //{
+     float elife[] = {42, 695.677, 612.277, 587.506, 542.691, 406.293, 362.73, 352.11, 357.628, 367.378, 366.354, 373.506, 375.006, 387.264, 406.977, 403.801, 427.106, 422.128, 436.897, 448.99, 463.579, 462.708, 472.669, 473.499, 462.906, 477.561, 490.159, 490.331, 488.194, 503.824, 503.67, 515.786, 531.645, 530.86, 524.621, 523.948, 537.76, 537.089, 550.267, 562.821};
+     float duration[] = {42, 320.637, 660.42, 444.106, 201.968, 466.397, 332.917, 141.796, 783.557, 211.201, 372.359, 689.184, 471.888, 811.389, 955.052, 194.497, 1081.83, 153.048, 1096.45, 1424.84, 236.813, 805.975, 337.408, 190.597, 203.704, 472.366, 735.152, 433.582, 992.878, 1427.68, 1441.29, 1449.16, 309.567, 143.188, 1028, 774.023, 1995.21, 272.787, 1117.55, 1433.29};
+    //}
+    //else if(typeFlag==1)//AmBe
+    //{
+      //  elife = {3,672.9,658.4,640.0};
+      //  duration = {3,41.371,24.7483,33.3846};
+    //}
+    //else//DD
+    //{
+      //  elife = {1,683.896};
+      //  duration = {41.6};
+    //}
+    float temp = 100.;
+    int n = (int)elife[0];
+    float duration_tot = 0.;
+    for(int i = 1; i <= n ; i++){
+        duration_tot +=duration[i];
+    }
+    for(int i = 1; i <= n ; i++){
+        duration[i] /= duration_tot;
+    }
+    float dice = curand_uniform(rand_state);
+    float percCount = 0.;
+    for(int i = 1; i <= n ; i++){
+        percCount += duration[i];
+       if(dice<=percCount){
+            temp = elife[i];
+            //if(temp<=0.)printf("%d, %f\\n",i,temp);
+            return temp;
+            break;
         }
+    }
 }
-
-__device__ float get_recomb_frac_delta(float energy){
-    float q2 = 0.04;
-    float q3 = 1.7;
-    float deltaR = q2 * (1 - expf(-energy/q3));
-    return deltaR;
-}
-
+        
 __device__ float get_g1_true(float dt, float g1mean){
     float A = 5.64008e2;
     float B = 3.92408e-1;
@@ -380,36 +340,45 @@ __global__ void signal_simulation(
     //return;
 
     //to determine whether it is ER or NR
-    bool simuTypeNR = true;
+    bool simuTypeNR = false;
+    int typeFlag = 0;
 
     //get energy randomly
-    float lower = 0.;
-    float upper = 50.;
+    float lower = 0.4;
+    float upper = 20.;
     
     float energy = curand_uniform(&s)*(upper-lower)+lower;
-    float weight = get_nr_energy_weight(energy);
-    //if(weight<=0.)weight = 0.;
+    float weight = get_tritium_energy_weight(energy);
+    if(weight<=0.)weight = 0.;
     
     //get detector parameters
 
     float g1 = nuisance_par[0]; //hit per photon
     float sPEres = 0.3; //pmt single phe resolution (gaussian assumed)
     float P_dphe = 0.2; //probab that 1 phd makes 2nd phe 
-    float SEG = 28.; //single electron gain, num of photon/electron 
+    float SEG = nuisance_par[2]; //single electron gain, num of photon/electron 
                                         //before elife decay&EEE
-    float g2 = nuisance_par[1]; //phd/electron
-    float ExtraEff = g2 / SEG; //electron extraction eff
+    float ExtraEff = nuisance_par[1]; //electron extraction eff
     float deltaG = 7.; //SEG resolution
-    float eLife_us = 600.; //the drift electron in microsecond
+    float eLife_us = get_elife(&s,typeFlag); //the drift electron in microsecond
     
-    //float s2_thr = 80.; //s2 threshold in phe
+    float hit_thr = 2.;
+    float s1_thr = 3.;
+    float s2_thr = 1000; //s2 threshold in phe
     float E_drift = 114.2; //drift electric field in V/cm
     float driftvelocity = 1.37824; //in mm/microsecond
     float density = 2.8611; //density of liquid xenon
     float TopDrift = 1200.; // mm 
-    float w_eV = 13.7; //average energy of each quanta in eV
 
-    //let the simulation begins
+    float pars[5] = {0.};//={W_eV,Nex/Ni, rmean, rdelta}
+    get_yield_pars(simuTypeNR, E_drift, energy, density, &pars[0], &nuisance_par[0]);
+    float w_eV = pars[0];
+    float L = pars[1];
+    float NexONi = pars[2];
+    float rmean = pars[3];
+    float deltaR = pars[4];
+
+    //let the simulation begin
 
     // 1) get mean quanta number
     int Nq_mean = (int)(energy / w_eV * 1000.);
@@ -420,18 +389,14 @@ __global__ void signal_simulation(
     if(Nq_actual <= 0. )Nq_actual = 0.;
     
     // 3) get quanta number after lindhard factor fluctuation
-    float L = get_lindhard_factor(simuTypeNR, energy);
     int Nq = gpu_binomial(&s, Nq_actual, L);
     if(Nq <= 0.)Nq = 0.;
     
-    // 4）get exciton ratio and do fluctuation
-    float NexONi = get_exciton_ratio(simuTypeNR, E_drift, energy, density);
+    // 4) get exciton ratio and do fluctuation
     int Ni = gpu_binomial(&s, Nq, 1/(1 +NexONi));
     int Nex = Nq - Ni;
 
     // 5) get recomb fraction fluctuation
-    float rmean = get_recomb_frac(simuTypeNR, E_drift, density, energy);
-    float deltaR = get_recomb_frac_delta(energy);
     float r = curand_normal(&s)*deltaR + rmean;
     if(r >= 1. )r = 1.;
     else if(r <= 0.)r = 0.;
@@ -447,8 +412,9 @@ __global__ void signal_simulation(
     // 8) get g1 hit(phd) number
     float g1_true = get_g1_true(dt,g1);
     int nHitsS1 = gpu_binomial(&s, Nph, g1_true);
-    //if(nHitsS1 <= 0.)return;
-    if(nHitsS1 <= 0.)nHitsS1 = 0.;
+    if(nHitsS1 < hit_thr)nHitsS1 = 0.;
+    //if(nHitsS1 < hit_thr)return;
+    //if(nHitsS1 <= 0.)nHitsS1 = 0.;
     
     // 9) get s1 in phe #, consider float phe
     int NpheS1 = nHitsS1 + gpu_binomial(&s, nHitsS1, P_dphe);
@@ -468,8 +434,9 @@ __global__ void signal_simulation(
     // 12) corrected s1 pulse area
     float InversedS1Correction = get_g1_inverse_correction_factor(dt);
     float pulseAreaS1Cor = pulseAreaBiasS1 * InversedS1Correction;
-    //if(pulseAreaS1Cor <= 0.)return;
-    if(pulseAreaS1Cor <= 0.)pulseAreaS1Cor = 0.;
+    //if(pulseAreaS1Cor <= 0.)pulseAreaS1Cor = 0.;
+    //if(pulseAreaS1Cor <= s1_thr)return;
+    if(pulseAreaS1Cor <= s1_thr)pulseAreaS1Cor = 0.;
 
     // 13) do electron drifting and extraction
     int Nee = gpu_binomial(&s, Ne, expf(-dt / eLife_us) * ExtraEff);
@@ -484,7 +451,6 @@ __global__ void signal_simulation(
     
     // 16) s2 pulse area, with pmt resolution
     float pulseAreaS2 = curand_normal(&s)*sqrtf(NpheS2)*sPEres + NpheS2; 
-    //if(pulseAreaS2 <= 0.)return;
     if(pulseAreaS2 <= 0.)pulseAreaS2 = 0.;
 
     // 17) biased s2 pulse area 
@@ -494,12 +460,18 @@ __global__ void signal_simulation(
    // if(pulseAreaBiasS2 <=0.)return;
     if(pulseAreaBiasS2 <=0.)pulseAreaBiasS2 = 0.;
 
-    // 18）corrected s2 pulse area
+    // 18) corrected s2 pulse area
     float InversedS2Correction = get_g2_inverse_correction_factor(dt, eLife_us);
     float pulseAreaS2Cor = pulseAreaBiasS2 * InversedS2Correction;    
-    //if(pulseAreaS2Cor <= 0.)return;
-    if(pulseAreaS2Cor <= 0.)pulseAreaS2Cor = 0.;
-  
+    //if(pulseAreaS2Cor <= s2_thr)return;
+    if(pulseAreaS2Cor <= s2_thr)pulseAreaS2Cor = 0.;
+    
+    //output[num_trials*0+iteration] = pulseAreaS1Cor;
+    //output[num_trials*1+iteration] = pulseAreaS2Cor;
+    //output[num_trials*2+iteration] = energy;
+    //output[num_trials*3+iteration] = weight;
+    //printf("%f ,%f, %f, %f\\n",eLife_us, pulseAreaS1Cor, pulseAreaS2, weight); 
+    
     if(pulseAreaS1Cor <= 0.||pulseAreaS2Cor <= 0.)return;
     
     int xBinning = (int)*(input+1);
@@ -516,26 +488,28 @@ __global__ void signal_simulation(
     float xvalue = (float)pulseAreaS1Cor;
     float yvalue = (float)log10f(pulseAreaS2Cor/pulseAreaS1Cor);
     
-    if(xvalue<xMin && yvalue>=yMax)atomicAdd(&output[1], 1.);
-    else if(xvalue>xMin && xvalue<xMax && yvalue>=yMax)atomicAdd(&output[2], 1.);
-    else if(xvalue>=xMax && yvalue>=yMax)atomicAdd(&output[3], 1.);
-    else if(xvalue<xMin && yvalue>yMin && yvalue<yMax)atomicAdd(&output[4], 1.);
+    if(xvalue<xMin && yvalue>=yMax)atomicAdd(&output[2], 1.);
+    else if(xvalue>xMin && xvalue<xMax && yvalue>=yMax)atomicAdd(&output[3], 1.);
+    else if(xvalue>=xMax && yvalue>=yMax)atomicAdd(&output[4], 1.);
+    else if(xvalue<xMin && yvalue>yMin && yvalue<yMax)atomicAdd(&output[5], 1.);
     else if(xvalue>=xMin && xvalue<xMax && yvalue>=yMin && yvalue<yMax)
     {
         int xbin = (int) ((xvalue - xMin)/xStep) + 1; 
         int ybin = (int) ((yvalue - yMin)/yStep) + 1;
-        weight *= get_s1_efficiency(nHitsS1);
-        if(weight<0.){weight = 0.;}
-        atomicAdd(&output[5], 1.);
-        int index = 9+(ybin-1)*xBinning+xbin;
-        int weightindex = 9+xBinning*yBinning+((ybin-1)*xBinning+xbin);
+        //weight *= get_s1_efficiency(nHitsS1);
+        //if(weight<0.){weight = 0.;}
+        atomicAdd(&output[6], 1.);
+        atomicAdd(&output[1], weight);
+        int index = 10+(ybin-1)*xBinning+xbin;
+        int errindex = 10+xBinning*yBinning+((ybin-1)*xBinning+xbin);
         atomicAdd(&output[index], weight);
-        atomicAdd(&output[weightindex],weight*weight);
+        atomicAdd(&output[errindex],weight*weight);
     }
-    else if(xvalue>=xMax && yvalue>yMin && yvalue<yMax)atomicAdd(&output[6], 1.);
-    else if(xvalue<xMin && yvalue<yMin)atomicAdd(&output[7], 1.);
-    else if(xvalue>xMin && xvalue<xMax && yvalue<yMin)atomicAdd(&output[8], 1.);
-    else if(xvalue>=xMax && yvalue<yMin)atomicAdd(&output[9], 1.);
+    else if(xvalue>=xMax && yvalue>yMin && yvalue<yMax)atomicAdd(&output[7], 1.);
+    else if(xvalue<xMin && yvalue<yMin)atomicAdd(&output[8], 1.);
+    else if(xvalue>xMin && xvalue<xMax && yvalue<yMin)atomicAdd(&output[9], 1.);
+    else if(xvalue>=xMax && yvalue<yMin)atomicAdd(&output[10], 1.);
+
 }
 }
 
