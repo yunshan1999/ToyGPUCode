@@ -9,12 +9,13 @@ const int ybinning = 100;
 double xmin = 2.;
 double xmax = 120.;
 double ymin = 0.;
-double ymax = log10(20000.);
+double ymax = 3.5;
+//double ymax = log10(20000.);
 double xstep = (xmax-xmin)/(double)xbinning;
 double ystep = (ymax-ymin)/(double)ybinning;
 TH2D * h1 = new TH2D("mc", "", xbinning, xmin, xmax, ybinning, ymin, ymax);
 std::ifstream infile;
-infile.open("../FittingGPU/outputs/2dband.dat");
+infile.open("../FittingGPU_9p/outputs/2dband.dat");
 const int N = 11 + xbinning*ybinning;
 double encoded_array[N] = {0};
 if (infile.is_open()) 
@@ -63,12 +64,12 @@ TCanvas * c1 = new TCanvas();
 c1->SetTitle("MC band");
 h1->SetStats(0);
 h1->SetXTitle("cS1[PE]");
-h1->SetYTitle("log(cS2/cS1)");
+h1->SetYTitle("log(cS2b)");
 h1->Draw("colz");
-c1->Print( "../FittingGPU/outputs/MCband.pdf)","pdf");
+c1->Print( "../FittingGPU_9p/outputs/MCband.pdf)","pdf");
 
 TCanvas * c2 = new TCanvas();
-TFile dataFile("../FittingGPU/data/reduce_ana3_p4_run1_tritium_5kV.root","read");
+TFile dataFile("../FittingGPU_9p/data/reduce_ana3_p4_run1_tritium_5kV.root","read");
 TTree * data_tree=(TTree*) dataFile.Get("out_tree");
 data_tree->Draw("log10(qS2BC_max):qS1C_max>>h2(100,xmin,xmax, 100, ymin, ymax)","qS1C_max>2&&qS1C_max<120","");
 
@@ -88,5 +89,5 @@ g3->SetLineWidth(1);
 g1->Draw("SAME");
 g2->Draw("SAME");
 g3->Draw("SAME");
-c2->Print( "../FittingGPU/outputs/DATAband.pdf)","pdf");
+c2->Print( "../FittingGPU_9p/outputs/DATAband.pdf)","pdf");
 }

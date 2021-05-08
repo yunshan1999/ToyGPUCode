@@ -3,6 +3,8 @@ import time
 import matplotlib.pyplot as plt
 import sys
 
+PATH = '../FittingGPU_9p/outputs/'
+
 try:
     from pycuda.compiler import SourceModule
     import pycuda.driver as drv
@@ -42,7 +44,7 @@ num_trials          = 2**20
 GPUSeed             = np.asarray(gpu_seed, dtype=np.int32)
 # iteration number and binning settings
 xbinning, xmin, xmax = [100, 2., 120.]
-ybinning, ymin, ymax = [100, 0., np.log10(20000.)]
+ybinning, ymin, ymax = [100, 0., 3.5]
 # histFlag gives intstruction about what kink of hists it will plot
 # 0 - 2d band, which requires 6 pars of hist setting
 # 1 - energy&Nph&Ne&cS1&cS2 comparison, which would be easily to decode to store samples, but requires larger storage space, better set num_trials~1e6 if someone need to do this.
@@ -56,8 +58,10 @@ elif histFlag == 1:
     output_trials = num_trials * 6
 
 output_array        = np.zeros(output_trials, dtype=np.float32)
-par_bestfit         = np.loadtxt("../FittingGPU/outputs/bestfit.dat")[1].T
+par_bestfit         = np.loadtxt(PATH+'bestfit.dat')[1].T
 nuisance_par_array = np.asarray(par_bestfit, dtype=np.float32)
+print(nuisance_par_array)
+
 # important step, need to push (or copy) it to GPU memory so that GPU function can use it
 # this step take time so shall minimize the number of times calling it
 tArgs               = [
@@ -80,6 +84,6 @@ d_gpu_scale['grid'] = (int(numBlocks), 1)
 # Run the GPU code
 GPUFunc(*tArgs, **d_gpu_scale)
 if histFlag == 0:
-    np.savetxt("../FittingGPU/outputs/2dband.dat",output_array)
+    np.savetxt(PATH+'2dband.dat',output_array)
 elif histFlag == 1:
-    np.savetxt("../FittingGPU/outputs/mcoutputs.dat",output_array)
+    np.savetxt(PATH+'mcoutputs.dat',output_array)

@@ -72,9 +72,9 @@ __device__ float interpolate1d(float x, float * array_x, float * array_y){
     }
 }
 
-__device__ float get_tritium_energy_weight(float energy){
+__device__ float get_tritium_energy_weight(float energy, float * nuisance_par){
 
-    float flat = 7.9719; 
+    float flat = nuisance_par[4]; 
     float T = energy; 
     float Q = 18.5906, pi = 3.1415926; 
     if (T > Q||T < 0)return flat; 
@@ -136,8 +136,8 @@ __device__ void get_yield_pars(bool simuTypeNR, float E_drift, float energy, flo
         pars[0] = Wq_eV;
         pars[1] = L;
         pars[2] = NexONi;
-        pars[3] = rmean + free_pars[5] + free_pars[6]*energy;
-        pars[4] = omega * free_pars[4];
+        pars[3] = rmean + free_pars[6] + free_pars[7]*energy + free_pars[8]*energy*energy;
+        pars[4] = omega * free_pars[5];
         if(pars[3]<0.)pars[3] = 0.;
         if(pars[3]>1.)pars[3] = 1.;
         if(pars[4]<0.)pars[4] = 0.;
@@ -193,8 +193,8 @@ __device__ void get_yield_pars(bool simuTypeNR, float E_drift, float energy, flo
         pars[0] = Wq_eV;
         pars[1] = 1.;
         pars[2] = NexONi;
-        pars[3] = rmean + free_pars[5] + free_pars[6]*energy;
-        pars[4] = omega * free_pars[4];
+        pars[3] = rmean + free_pars[6] + free_pars[7]*energy + free_pars[8]*energy*energy;
+        pars[4] = omega * free_pars[5];
         if(pars[3]<0.)pars[3] = 0.;
         if(pars[3]>1.)pars[3] = 1.;
         if(pars[4]<0.)pars[4] = 0.;
@@ -373,7 +373,7 @@ __global__ void signal_simulation(
     float upper = 70.;
     
     float energy = curand_uniform(&s)*(upper-lower)+lower;
-    float weight = get_tritium_energy_weight(energy);
+    float weight = get_tritium_energy_weight(energy, &nuisance_par[0]);
     if(weight<=0.)weight = 0.;
     
     //get detector parameters
