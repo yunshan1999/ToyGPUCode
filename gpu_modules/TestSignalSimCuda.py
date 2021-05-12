@@ -83,7 +83,7 @@ __device__ float get_tritium_energy_weight(float energy, float * nuisance_par){
     float E = T + m; 
     float eta = 2.*1./137*E/P; 
     float F = 2*pi*eta/(1-exp(-2*pi*eta)); 
-    return double(F * P * E * (Q - T) * (Q - T) * 0.00001 + flat);
+    return float(F * P * E * (Q - T) * (Q - T) * 0.00001 + flat);
 }
 
 __device__ float get_fano_factor(bool simuTypeNR, float density, int Nq_mean, float E_drift){
@@ -132,7 +132,7 @@ __device__ void get_yield_pars(bool simuTypeNR, float E_drift, float energy, flo
         float FreeParam[] = {1.,1.,0.1,0.5,0.19,2.25};
         float omega = FreeParam[2] * expf(-0.5 * powf(elecFrac - FreeParam[3],2.)/(FreeParam[4] * FreeParam[4]));
         if(omega < 0.)omega = 0.;
-        double L = (Nq / energy) * Wq_eV * 1e-3;
+        float L = (Nq / energy) * Wq_eV * 1e-3;
         pars[0] = Wq_eV;
         pars[1] = L;
         pars[2] = NexONi;
@@ -164,7 +164,7 @@ __device__ void get_yield_pars(bool simuTypeNR, float E_drift, float energy, flo
         float QyLvlhighE = 28.;
       //      if (density > 3.) QyLvlhighE = 49.; Solid Xe effect from Yoo. But,
       //      beware of enabling this line: enriched liquid Xe for neutrinoless
-      //      double beta decay has density higher than 3g/cc;
+      //      float beta decay has density higher than 3g/cc;
         float Qy = QyLvlmedE +
                   (QyLvllowE - QyLvlmedE) /
                       powf(1. + 1.304 * powf(energy, 2.1393), 0.35535) +
@@ -331,7 +331,7 @@ __global__ void signal_simulation(
         int *seed,
         float *input,
         float *nuisance_par,
-        float *output)
+        double *output)
 {
     // initiate the random sampler, must have.
     int iteration = blockIdx.x * blockDim.x * blockDim.y + threadIdx.y * blockDim.x + threadIdx.x;
@@ -505,30 +505,30 @@ __global__ void signal_simulation(
     float yMax = (float)*(input+6);
     float yStep = (yMax - yMin)/(float)yBinning;
 
-    atomicAdd(&output[0], 1.);
+    atomicAdd(&output[0],(double)1.);
     //get values, overflows and underflows in output[1]-output[9]
     float xvalue = (float)pulseAreaS1Cor;
     float yvalue = (float)log10f(pulseAreaS2Corb);
     
-    if(xvalue<xMin && yvalue>=yMax)atomicAdd(&output[2], 1.);
-    else if(xvalue>xMin && xvalue<xMax && yvalue>=yMax)atomicAdd(&output[3], 1.);
-    else if(xvalue>=xMax && yvalue>=yMax)atomicAdd(&output[4], 1.);
-    else if(xvalue<xMin && yvalue>yMin && yvalue<yMax)atomicAdd(&output[5], 1.);
+    if(xvalue<xMin && yvalue>=yMax)atomicAdd(&output[2],(double)1.);
+    else if(xvalue>xMin && xvalue<xMax && yvalue>=yMax)atomicAdd(&output[3], (double)1.);
+    else if(xvalue>=xMax && yvalue>=yMax)atomicAdd(&output[4], (double)1.);
+    else if(xvalue<xMin && yvalue>yMin && yvalue<yMax)atomicAdd(&output[5], (double)1.);
     else if(xvalue>=xMin && xvalue<xMax && yvalue>=yMin && yvalue<yMax)
     {
         int xbin = (int) ((xvalue - xMin)/xStep) + 1; 
         int ybin = (int) ((yvalue - yMin)/yStep) + 1;
-        atomicAdd(&output[6], 1.);
-        atomicAdd(&output[1], weight);
+        atomicAdd(&output[6], (double)1.);
+        atomicAdd(&output[1],(double)weight);
         int index = 10+(ybin-1)*xBinning+xbin;
         int errindex = 10+xBinning*yBinning+((ybin-1)*xBinning+xbin);
-        atomicAdd(&output[index], weight);
-        atomicAdd(&output[errindex],weight*weight);
+        atomicAdd(&output[index], (double)weight);
+        atomicAdd(&output[errindex],(double)(weight*weight));
     }
-    else if(xvalue>=xMax && yvalue>yMin && yvalue<yMax)atomicAdd(&output[7], 1.);
-    else if(xvalue<xMin && yvalue<yMin)atomicAdd(&output[8], 1.);
-    else if(xvalue>xMin && xvalue<xMax && yvalue<yMin)atomicAdd(&output[9], 1.);
-    else if(xvalue>=xMax && yvalue<yMin)atomicAdd(&output[10], 1.);
+    else if(xvalue>=xMax && yvalue>yMin && yvalue<yMax)atomicAdd(&output[7], (double)1.);
+    else if(xvalue<xMin && yvalue<yMin)atomicAdd(&output[8], (double)1.);
+    else if(xvalue>xMin && xvalue<xMax && yvalue<yMin)atomicAdd(&output[9], (double)1.);
+    else if(xvalue>=xMax && yvalue<yMin)atomicAdd(&output[10], (double)1.);
 
 }
 }

@@ -54,7 +54,7 @@ def get_2dband(theta, binning):
     num_trials          = 2**23
     GPUSeed             = np.asarray(gpu_seed, dtype=np.int32)
     input_array         = np.asarray([num_trials, xbin, xmin, xmax, ybin, ymin, ymax], dtype=np.float32)
-    output_array        = np.zeros(11+xbin*ybin*2, dtype=np.float32)
+    output_array        = np.zeros(11+xbin*ybin*2, dtype=np.double)
     par_array = np.asarray(theta, dtype=np.float32)
 
     # important step, need to push (or copy) it to GPU memory so that GPU function can use it
@@ -105,33 +105,34 @@ def get_lnlikelihood(theta):
         [50, 2.,120.],
         [50, 0., 3.5]
     ]
-    #MC_starter =  time.time()
+    MC_starter =  time.time()
     hmc = get_2dband(theta, binning)
-    #MC_time = time.time() - MC_starter
-    #print(f"MC in this step is{MC_time:1.3e}")
+    MC_time = time.time() - MC_starter
+    print(f"MC in this step is{MC_time:1.3e}")
     
-    #lnL_starter = time.time()
+    lnL_starter = time.time()
     lnLikelihood_total = 0.
     
     # calculate likelihood 
     hmc = np.asarray(hmc) + 1e-35 # the small value of 1e-35 is for avoiding calculation infinity
     Nmc = hmc[1]
-    print(hmc) 
+    print(Nmc) 
     # this value is determined after test the normal Nmc, just for this tritium weight#
     # to aviod almost empty hist #
     # for other energy spectrum input, need to test again#
     # just print out normal Nmc is okay #
-    if Nmc<1e6:    
-        return -np.inf
-    else:
+    #if Nmc<1e6:    
+    #    return -np.inf
+    #else:
+    if True:
         inds = np.where((cS1>=2)&(cS1<120.)&(np.log10(cS2b)<3.5))[0]
         cS1 = cS1[inds]
         cS2b = cS2b[inds]
 
         bin_inds = get_bin_num(cS1,np.log10(cS2b),binning)
         lnLikelihood_total=np.sum(np.log(hmc[bin_inds]/Nmc))
-        #lnL_time = time.time()-lnL_starter
-        #print(f"lnL in this step is {lnL_time:1.3e}")
+        lnL_time = time.time()-lnL_starter
+        print(f"lnL in this step is {lnL_time:1.3e}")
         return lnLikelihood_total
 
 def get_lnprior(theta):
@@ -156,7 +157,7 @@ ndim_nonzero, ndim_zero = 5, 3
 ndim = ndim_nonzero + ndim_zero
 updateFlag = False
 scaleFactor = 1.
-#p0a = [np.concatenate(nuisance_mean,np.asarray([20.,1.],np.float))*(1 + 0.1*np.random.randn(ndim_nonzero)) for i in range(nwalkers)]
+#p0a = [np.concatenate(nuisance_mean,np.asarray([20.,1.],np.float32))*(1 + 0.1*np.random.randn(ndim_nonzero)) for i in range(nwalkers)]
 p0a = [[nuisance_mean[0], nuisance_mean[1], nuisance_mean[2], 20., 1.]*(1 + 0.1*np.random.randn(ndim_nonzero)) for i in range(nwalkers)]
 p0b = [[0., 0., 0.] + 0.05*np.random.randn(ndim_zero) for i in range(nwalkers)]
 p0 = np.concatenate((p0a, p0b), axis=1)
