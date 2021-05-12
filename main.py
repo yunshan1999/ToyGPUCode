@@ -116,15 +116,15 @@ def get_lnlikelihood(theta):
     # calculate likelihood 
     hmc = np.asarray(hmc) + 1e-35 # the small value of 1e-35 is for avoiding calculation infinity
     Nmc = hmc[1]
-    
+    print(hmc) 
     # this value is determined after test the normal Nmc, just for this tritium weight#
     # to aviod almost empty hist #
     # for other energy spectrum input, need to test again#
     # just print out normal Nmc is okay #
-    if Nmc<1e5:    
+    if Nmc<1e6:    
         return -np.inf
     else:
-        inds = np.where((cS1<120.)&(np.log10(cS2b)<3.5))[0]
+        inds = np.where((cS1>=2)&(cS1<120.)&(np.log10(cS2b)<3.5))[0]
         cS1 = cS1[inds]
         cS2b = cS2b[inds]
 

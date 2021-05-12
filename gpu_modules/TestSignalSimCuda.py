@@ -380,10 +380,10 @@ __global__ void signal_simulation(
     
     //float hit_thr = 1.;
     float s1_thr = 2.;
-    //float s2_thr_beforecorrection = 80;
-    //float s2_thr = 80; //s2 threshold in phe
+    float s2b_thr_beforecorrection = 80*0.25;
+    //float s2b_thr = 80*0.25; //s2 threshold in phe
     float s1_max = 120;
-    float s2_max = 20000;
+    //float s2_max = 20000;
     float E_drift = 115.6; //drift electric field in V/cm
     float driftvelocity = 1.2; //in mm/microsecond
     float dt_min = 20;//in ms
@@ -471,7 +471,8 @@ __global__ void signal_simulation(
     
     // 16) s2 pulse area, with pmt resolution
     float pulseAreaS2b = curand_normal(&s)*sqrtf(NpheS2b)*sPEres + NpheS2b; 
-    if(pulseAreaS2b <= 0.)pulseAreaS2b = 0.;
+    //if(pulseAreaS2b <= 0.)pulseAreaS2b = 0.;
+    if(pulseAreaS2b < s2b_thr_beforecorrection)return;
 
     // 17) biased s2 pulse area 
     //float biasS2, fluctuationS2;
@@ -484,7 +485,7 @@ __global__ void signal_simulation(
     float InversedS2Correction = get_g2_inverse_correction_factor(dt, eLife_us);
     float pulseAreaS2Corb = pulseAreaS2b * InversedS2Correction;    
     //if(pulseAreaS2Corb <= s2_thr)return;
-    if(pulseAreaS2Corb > s2_max)return;
+    //if(pulseAreaS2Corb < s2b_thr_beforecorrection)return;
 
     weight *= get_s1_tagging_eff(simuTypeNR, pulseAreaS1Cor);
     weight *= get_cs1_qualitycut_eff(pulseAreaS1Cor); 
