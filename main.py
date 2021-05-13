@@ -95,7 +95,7 @@ def get_bin_num(x, y, binning):
 def get_lnlikelihood(theta):
 
     # data are in root ttree, we use uproot lib to get them as arrays
-    DATA_PATH = './data/reduce_ana3_p4_run1_tritium_5kV.root'
+    DATA_PATH = '../data/reduce_ana3_p4_run1_tritium_5kV.root'
     data_tree = uproot.open(DATA_PATH)["out_tree"]
     cS1 = data_tree["qS1C_max"].array()
     cS2b = data_tree["qS2BC_max"].array()
@@ -105,34 +105,35 @@ def get_lnlikelihood(theta):
         [50, 2.,120.],
         [50, 0., 3.5]
     ]
-    MC_starter =  time.time()
+    #MC_starter =  time.time()
     hmc = get_2dband(theta, binning)
-    MC_time = time.time() - MC_starter
-    print(f"MC in this step is{MC_time:1.3e}")
+    #MC_time = time.time() - MC_starter
+    #print(f"MC in this step is{MC_time:1.3e}")
     
-    lnL_starter = time.time()
+    #lnL_starter = time.time()
     lnLikelihood_total = 0.
     
     # calculate likelihood 
     hmc = np.asarray(hmc) + 1e-35 # the small value of 1e-35 is for avoiding calculation infinity
     Nmc = hmc[1]
-    print(Nmc) 
+    #print(Nmc) 
     # this value is determined after test the normal Nmc, just for this tritium weight#
     # to aviod almost empty hist #
     # for other energy spectrum input, need to test again#
     # just print out normal Nmc is okay #
-    #if Nmc<1e6:    
-    #    return -np.inf
-    #else:
-    if True:
+    if Nmc<1e6:    
+        return -np.inf
+    else:
         inds = np.where((cS1>=2)&(cS1<120.)&(np.log10(cS2b)<3.5))[0]
-        cS1 = cS1[inds]
-        cS2b = cS2b[inds]
-
-        bin_inds = get_bin_num(cS1,np.log10(cS2b),binning)
+        cS1 = np.array(cS1[inds])
+        cS2b = np.array(cS2b[inds])
+        events_for_delete = [513, 537, 681, 705, 817, 964, 1072, 1197, 1269]
+        new_cS1 = np.delete(cS1, events_for_delete)
+        new_cS2b = np.delete(cS2b, events_for_delete)
+        bin_inds = get_bin_num(new_cS1,np.log10(new_cS2b),binning)
         lnLikelihood_total=np.sum(np.log(hmc[bin_inds]/Nmc))
-        lnL_time = time.time()-lnL_starter
-        print(f"lnL in this step is {lnL_time:1.3e}")
+        #lnL_time = time.time()-lnL_starter
+        #print(f"lnL in this step is {lnL_time:1.3e}")
         return lnLikelihood_total
 
 def get_lnprior(theta):
@@ -149,7 +150,6 @@ def get_lnprob(theta, scale):
     lnprob =  lp + get_lnlikelihood(theta)
     return lnprob/scale
 
-
 import emcee
 
 nwalkers =  100
@@ -161,7 +161,6 @@ scaleFactor = 1.
 p0a = [[nuisance_mean[0], nuisance_mean[1], nuisance_mean[2], 20., 1.]*(1 + 0.1*np.random.randn(ndim_nonzero)) for i in range(nwalkers)]
 p0b = [[0., 0., 0.] + 0.05*np.random.randn(ndim_zero) for i in range(nwalkers)]
 p0 = np.concatenate((p0a, p0b), axis=1)
-
 # get walkers initial positions from the last run
 #samplesFromLastRun = np.loadtxt("./outputs/samples.dat")
 #samplesFromLastRunOriginal = samplesFromLastRun.reshape(samplesFromLastRun.shape[0], samplesFromLastRun.shape[1] // ndim, ndim)
@@ -257,4 +256,3 @@ axs[2, 1].set_title('p2',fontsize=7)
 fig.tight_layout()
 
 plt.savefig("./outputs/parameters.pdf")
-
