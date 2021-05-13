@@ -4,6 +4,13 @@ pandax4t_reweight_fitting = """
 #include <math.h>
 #include <thrust/device_vector.h>
 extern "C" {
+  
+   __device__ float legendreSeries(float xx, float *par )
+  {
+    float normX = par[0];
+    float fluc = 1. * ( par[1] + par[2] * xx / normX + par[3] * (0.5*(3*xx*xx/normX/normX - 1.)) );
+    return fluc;
+  }
 
   __device__ float interpolate1d(float x, float * array_x, float * array_y){
     int ndimx = (int)array_x[0];
@@ -47,20 +54,9 @@ extern "C" {
 
   }
 
-  __device__ float get_s1_efficiency(int nHitsS1){
-    float hit[] = {20,
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
-      11, 12, 13, 14, 15, 16, 17, 18, 19, 20 };
-    float eff[] = {20,
-      0.,0.,0.3442748091603054,0.6625954198473284,0.7839694656488551,
-      0.836641221374046,0.8412213740458017,0.8893129770992368,
-      0.9030534351145039,0.9053435114503818,0.919083969465649,
-      0.9328244274809161,0.9442748091603055,0.9511450381679392,
-      0.9534351145038169,0.9534351145038169,0.9603053435114505,
-      0.9648854961832063,0.9717557251908397,0.9763358778625955
-    };
-    float Eff = interpolate1d((float)nHitsS1, hit, eff);
-    return Eff;
+  __device__ float get_efficiency_FermiDirac(float xx,float *par){
+    float eff = 1./(expf(-1.*(xx-par[0])/par[1]) + 1.);
+    return eff;
   }
 
 
@@ -164,7 +160,7 @@ extern "C" {
 
 
 
-  __device__ void get_yield_pars(bool simuTypeNR, float E_drift, float energy, float density, float * pars, float * free_pars){
+  __device__ void get_yield_pars(bool simuTypeNR, float E_drift, float energy, float density, float * pars){
     //This function calculates Lindhaed, W, Nex/Ni, recomb fraction mean and delta and returns them all
     //ATTENTION: Just to clarify.NuisParam&FreeParam are NESTv2 Pars, not the ones we are going to fit ni this model. Here we just regard them as intrinsic fixed pars.
 
@@ -201,8 +197,8 @@ extern "C" {
       pars[0] = Wq_eV;
       pars[1] = L;
       pars[2] = NexONi;
-      pars[3] = rmean * (1 + free_pars[4] + free_pars[5]*energy);
-      pars[4] = omega * free_pars[6];
+      pars[3] = rmean ;
+      pars[4] = omega ;
       if(pars[3]<0.)pars[3] = 0.;
       if(pars[3]>0.9)pars[3] = 0.9;
       if(pars[4]<0.001)pars[4] = 0.001;
@@ -256,8 +252,8 @@ extern "C" {
       pars[0] = Wq_eV;
       pars[1] = 1.;
       pars[2] = NexONi;
-      pars[3] = rmean * (1 + free_pars[4] + free_pars[5]*energy);
-      pars[4] = omega * free_pars[6];
+      pars[3] = rmean ;
+      pars[4] = omega ;
       if(pars[3]<0.)pars[3] = 0.;
       if(pars[3]>0.9)pars[3] = 0.9;
       if(pars[4]<0.)pars[4] = 0.;
@@ -265,140 +261,38 @@ extern "C" {
     }
   }
 
-
-  __global__ void main_reweight_fitting(float *new_v_variable,
-      float *inTree, float *inTree_par,
-      double *output, double *output_par, int mode)
+  __global__ void renormalization_reweight(
+  float *e_reweight_x,float *e_reweight_y,
+  float *inTree, float *inTree_par, 
+  float *out_weight,float *out_normalization,
+  double *output,double *output_par)
   {
-    // initiate the random sampler, must have.
+     
     int iteration = blockIdx.x * blockDim.x * blockDim.y + threadIdx.y * blockDim.x + threadIdx.x;
     // get the number of trials
     int num_trials      = (int) *(inTree_par);
-    if (iteration>num_trials|| iteration<1) return;
+    if (iteration>num_trials) return;
     int stride_inTree = (int) *(inTree_par+1);
     float* entry_data = (float*)((char*)inTree + iteration * stride_inTree);
-
     float pulseAreaS1Cor = (float) *(entry_data);
-    float pulseAreaS2Cor = (float) *(entry_data+1);
-    float dt = (float) *(entry_data+2);
-    float eLife_us = (float) *(entry_data+3);
-
-    float g1 = (float) *(entry_data+4);
-    float Nph = (float) *(entry_data+5);
-    float nHitsS1 = (float) *(entry_data+6);
-
-    float eee = (float) *(entry_data+7);
-    float Ne = (float) *(entry_data+8);
-    float Nee = (float) *(entry_data+9);
-    float weight = (float) *(entry_data+10);
-    float seg = (float) *(entry_data+11);
-    float nHitsS2 = (float) *(entry_data+12);
-    float bottom_fraction = (float) *(entry_data+13);
-    float pulseAreaS2CorB = (float) *(entry_data+14);
-    float w_eV = *(entry_data+15);
-    float L = (float) *(entry_data+16);
-    float NexONi= (float) *(entry_data+17);
-    float rmean = (float) *(entry_data+18);
-    float deltaR = (float) *(entry_data+19);
+    float pulseAreaS2CorB = (float) *(entry_data + 14);
     float energy = (float) *(entry_data+20);
-    float Nq_actual = (float) *(entry_data+21);
-    float Nq = (float) *(entry_data+22);
-    float Ni = (float) *(entry_data+23);
-    float r = (float) *(entry_data+24);
-    float pulseAreaBiasS2 = (float) *(entry_data+25);
-
-
-    //the real random walk space is half of the initial data for every dimension
-    float g1_new =  (float) *(new_v_variable);
-    float eee_new =  (float) *(new_v_variable+1);
-    float seg_new =  (float) *(new_v_variable+2);
-    float bottom_fraction_new =  (float) *(new_v_variable+3);
-    float p0Recomb_new = (float) *(new_v_variable+4);
-    float p1Recomb_new = (float) *(new_v_variable+5);
-    float p0FlucRecomb_new = (float) *(new_v_variable+6);
-    float flatE_new = (float) *(new_v_variable+7);
-    float par_e[]={flatE_new};
-    float energy_weight_new = get_tritium_energy_weight(energy,par_e);
     
-    float pars[5]={0};
+    float e/Users/danzhang/Downloads/tmp_weight_narrowerSpace_noEff/whole_energy_slice_RecombRatio.pdf nergy_dRdE = (float) *(out_normalization + iteration);
 
-    float E_drift = 115.6; //drift electric field in V/cm
-    float density = 2.8611; //density of liquid xenon
-    bool simuTypeNR = false;
-
-    get_yield_pars(simuTypeNR, E_drift, energy, density, &pars[0], new_v_variable);
-    float w_eV_new = pars[0];
-    float L_new = pars[1];//lindhard factor
-    float NexONi_new = pars[2];
-    float rmean_new = pars[3];
-    float deltaR_new = pars[4];
-
-    float g1_true = get_g1_true(dt,g1);
-    float g1_true_new = get_g1_true(dt,g1_new);
-
-    double ReweightingWeight = 1.;
-    ReweightingWeight *= (double) binomial_ratio(Nq, Nq_actual, L_new,L);
-    double r1 = (double) truncated_normal_ratio(r,rmean_new,deltaR_new,rmean,deltaR,0.,1.);
-    double r2 = (double) binomial_ratio(int(pulseAreaS2CorB),int(pulseAreaS2Cor),bottom_fraction_new,bottom_fraction);
-    double r3 = (double) binomial_ratio(int(nHitsS1), int(Nph), g1_true_new, g1_true);
-    double r4 = (double) binomial_ratio(int(Nee), int(Ne), exp(-double(dt) / double(eLife_us)) * double(eee_new),exp(-double(dt) / double(eLife_us)) * double(eee));
-    double r5 = (double) normal_ratio(nHitsS2, double(seg_new) * double(Nee), sqrt(double(seg_new) * double(Nee)), double(seg) * double(Nee), sqrt(double(seg) * double(Nee)));
-    ReweightingWeight *= double(r1 * r2 * r3 * r4 * r5);
-
-    //int offsetCheck =1000;
-    //if(iteration >200 + offsetCheck && iteration <300 + offsetCheck)
-    //{
-    //  printf("i %d,  r1 %f,  r2 %f,  r3 %f, r4 %f, r5 %f\\n",iteration, r1 ,r2 , r3, r4, r5);
-    //  double test = pow(5.3,1000);
-    //  printf("i %d, %f, %f, %f, %f, %f, %f\\n",iteration, nHitsS1, Nph, g1_true_new, g1_true, r3, test);
-    //}
-
-
-    if (pulseAreaS2Cor < 80.  || pulseAreaS2CorB == 0. || pulseAreaS1Cor < 2 )ReweightingWeight = 0;
+    float weight =  (float) *(out_weight + iteration);
+    float filledEnergyWeight=interpolate1d(energy,e_reweight_x,e_reweight_y);
     
-    for (int i=0;i<26;i++)
+    float renormalizationW = weight * energy_dRdE / filledEnergyWeight;
+    //float renormalizationW = weight;
+    if(isnan(renormalizationW) ||isinf(renormalizationW)) 
     {
-      float enter_i = (float) *(entry_data+i);
-      if( enter_i == float(0.))
-      {
-        ReweightingWeight = 0.;
-        r1 = 0.;
-        r2 = 0.;
-        r3 = 0.;
-        r4 = 0.;
-        r5 = 0.;
-        break;
-      }
+      renormalizationW = 0.;
     }
 
-    double new_weight = double(energy_weight_new) * ReweightingWeight;
-    //filling new weight for mode = 1
-    if(isnan(new_weight) ||isinf(new_weight)) 
-    {
-      new_weight = 0;
-
-    }
-    if(isnan(ReweightingWeight) ||isinf(ReweightingWeight)) 
-    {
-      ReweightingWeight = 0;
-
-    }
-    if(mode == 1 )
-    {
-      if(ReweightingWeight>10)printf("weird %d %f\\n",iteration,ReweightingWeight);
-
-      if(iteration<100) printf("newweight %f \\n", new_weight);
-      *(entry_data+10) =  (float) ReweightingWeight; 
-      *(entry_data+15) =  (float) r1; 
-      *(entry_data+16) =  (float) r2; 
-      *(entry_data+17) =  (float) r3; 
-      *(entry_data+21) =  (float) r4; 
-      *(entry_data+22) =  (float) r5; 
-      *(entry_data+23) =  (float) energy_weight_new; 
-    }
-    
-
-    //filling ouput 2d histogram
+    *(out_weight + iteration) = (float) renormalizationW;
+   
+   //filling ouput 2d histogram
     int xBinning = (int)*(output_par+1);
     double xMin = (double)*(output_par+2);
     double xMax = (double)*(output_par+3);
@@ -414,20 +308,218 @@ extern "C" {
 
     //printf("I am block%d and thread%d for iteration%d \\n",blockIdx.x, threadIdx.x, iteration);
     //float* check_2d = (float*)((char*)output + 1 * xBinning * sizeof(float));
-    //if (iteration < int(10) )
-    //{
-    //    printf("ori: g1, eee, seg, reweighting: %.2f, %.2f, %.2f, %.2f %f\\n",g1,eee,seg,ReweightingWeight, (float) *(check_2d));
-    //}
 
+    //if(iteration<3 || weight > 5)
+    //{
+    //  printf("iter %d, energy%f, weight %f, renormalizationW %f %f %f %f %f\\n", iteration,energy,weight,renormalizationW, xvalue,yvalue,xMin,yMax);
+    //}
     if(xvalue>=xMin && xvalue<xMax && yvalue>=yMin && yvalue<yMax)
     {
       int xbin = floorf((xvalue - xMin)/xStep) ;
       int ybin = floorf((yvalue - yMin)/yStep) ;
       double* data_address = (double*) ((char*)output + ybin*xBinning * sizeof(double)) + xbin;
-      atomicAdd(data_address,new_weight);
-      atomicAdd(output_par,new_weight);
+      atomicAdd(data_address,renormalizationW);
+      atomicAdd(output_par,renormalizationW);
 
     }
+ 
+  
+  }
+
+  __global__ void main_reweight_fitting(float *new_v_variable,
+      float *inTree, float *inTree_par,
+      double *output, double *output_par,
+      float *out_reweight, float *out_normalization,
+      int mode)
+  {
+    // initiate the random sampler, must have.
+    int iteration = blockIdx.x * blockDim.x * blockDim.y + threadIdx.y * blockDim.x + threadIdx.x;
+    // get the number of trials
+    int num_trials      = (int) *(inTree_par);
+    if (iteration>num_trials) return;
+    int stride_inTree = (int) *(inTree_par+1);
+    
+    float stepE = (float) *(inTree_par+2);
+    float minE = (float) *(inTree_par+3);
+    float maxE = (float) *(inTree_par+4);
+    //if(iteration<2)
+    //{
+    //  printf("energy: %d %d %f %f %f",num_trials,stride_inTree,stepE,minE,maxE);
+    //}
+
+    float* entry_data = (float*)((char*)inTree + iteration * stride_inTree);
+
+    float pulseAreaS1Cor = (float) *(entry_data);
+    float pulseAreaS2Cor = (float) *(entry_data+1);
+    float dt = (float) *(entry_data+2);
+    float eLife_us = (float) *(entry_data+3);
+
+    float G1 = (float) *(entry_data+4);
+    float Nph = (float) *(entry_data+5);
+    float nHitsS1 = (float) *(entry_data+6);
+
+    float eee = (float) *(entry_data+7);
+    float Ne = (float) *(entry_data+8);
+    float Nee = (float) *(entry_data+9);
+    float weight = (float) *(entry_data+10);
+    float seg = (float) *(entry_data+11);
+    float nHitsS2 = (float) *(entry_data+12);
+    //float bottom_fraction = (float) *(entry_data+13);
+    float pulseAreaS2CorB = (float) *(entry_data+14);
+    float pulseAreaBiasS2 = (float) *(entry_data+15);
+    float L = (float) *(entry_data+16);
+    float r = (float) *(entry_data+17);
+    float rmean = (float) *(entry_data+18);
+    float deltaR = (float) *(entry_data+19);
+    float energy = (float) *(entry_data+20);
+    float Nq_actual = (float) *(entry_data+21);
+    float Nq = (float) *(entry_data+22);
+    int effectiveSimuAccept = (int) *(entry_data+23);
+
+
+
+    //the real random walk space is half of the initial data for every dimension
+    float G1_new =  (float) *(new_v_variable);
+    float g2b_new =  (float) *(new_v_variable+1);
+    float seg_new =  (float) *(new_v_variable+2);
+    float p2Recomb_new =  (float) *(new_v_variable+3);
+    float p0Recomb_new = (float) *(new_v_variable+4);
+    float p1Recomb_new = (float) *(new_v_variable+5);
+    float p0FlucRecomb_new = (float) *(new_v_variable+6);
+    float flatE_new = (float) *(new_v_variable+7);
+    
+    float P_dphe = 0.21; //probab that 1 phd makes 2nd phe
+    float g1_new = G1_new / (1. + P_dphe);
+    float eee_new = g2b_new / seg_new;
+    float par_e[]={flatE_new};
+    float energy_weight_new = get_tritium_energy_weight(energy,par_e);
+    if(energy_weight_new < 0.)energy_weight_new =0.;
+    
+    float pars[5]={0};
+
+    float E_drift = 115.6; //drift electric field in V/cm
+    float density = 2.8611; //density of liquid xenon
+    bool simuTypeNR = false;
+
+    get_yield_pars(simuTypeNR, E_drift, energy, density, &pars[0]);
+    float L_new = pars[1];//lindhard factor
+    float fittingRmean[] = {maxE,p0Recomb_new,p1Recomb_new,p2Recomb_new};
+    float rmean_new = pars[3] + legendreSeries(energy,&fittingRmean[0]);
+    float deltaR_new = pars[4] * p0FlucRecomb_new;
+    bool debug = false;
+    if(debug)
+    {
+      //rmean_new  = pars[3] + legendreSeries(energy,&fittingRmean[0]);
+      rmean_new  = 0.015 * energy + legendreSeries(energy,&fittingRmean[0]);
+      deltaR_new = 0.035 * p0FlucRecomb_new;
+    }
+
+    float g1 = G1 / (1. + P_dphe);
+    float g1_true = get_g1_true(dt,g1);
+    float g1_true_new = get_g1_true(dt,g1_new);
+
+    double ReweightingWeight = 1.;
+    ReweightingWeight *= (double) binomial_ratio(Nq, Nq_actual, L_new,L);
+    double r1 = (double) truncated_normal_ratio(r,rmean_new,deltaR_new,rmean,deltaR,0.,1.);
+    //double r2 = (double) binomial_ratio(int(pulseAreaS2CorB),int(pulseAreaS2Cor),bottom_fraction_new,bottom_fraction);
+    double r3 = (double) binomial_ratio(int(nHitsS1), int(Nph), g1_true_new, g1_true);
+    double r4 = (double) binomial_ratio(int(Nee), int(Ne), exp(-double(dt) / double(eLife_us)) * double(eee_new),exp(-double(dt) / double(eLife_us)) * double(eee));
+    double r5 = (double) normal_ratio(nHitsS2, double(seg_new) * double(Nee), sqrt(double(seg_new) * double(Nee)), double(seg) * double(Nee), sqrt(double(seg) * double(Nee)));
+    ReweightingWeight *= double(r1 *  r3 * r4 * r5);
+    //ReweightingWeight *= r1 ;
+
+    float TotalAcceptance = 1.;
+    int s1s2RangeAccept = 1.;
+    if ( int(nHitsS1) <= 1 ||  pulseAreaS2CorB <= 0. || pulseAreaS1Cor < 2 )
+    {
+      s1s2RangeAccept = 0.;
+
+    }
+
+
+    //if (iteration < int(10) )
+    //{
+    //    printf("ori: g1, eee, seg, reweighting: %.2f, %.2f, %.2f, %.2f %f %f %f %f\\n",g1,eee,seg,ReweightingWeight, r1,r3,r4,r5);
+    //}
+
+    
+
+    if(isnan(ReweightingWeight) ||isinf(ReweightingWeight) || ReweightingWeight <= 0.) 
+    {
+      
+      //effectiveSimuAccept = 0.;
+      ReweightingWeight = 0;
+
+    }
+    //int offsetCheck =1000;
+    //if(iteration >200 + offsetCheck && iteration <300 + offsetCheck)
+    //if(ReweightingWeight>10.)
+    //{
+    //  printf("i %d,  r1 %f,  r2 %f,  r3 %f, r4 %f, r5 %f\\n",iteration, r1 ,r2 , r3, r4, r5);
+    //  printf("i %d, %f, %f, %f, %f, %f, %f\\n",iteration, nHitsS1, Nph, g1_true_new, g1_true, r3, ReweightingWeight);
+    //
+    //}
+
+    float eff = 1.;
+    
+    //s1_eff for tritium
+    float par_s1_eff[]={-1.25,4.2255};
+    eff *= get_efficiency_FermiDirac(pulseAreaS1Cor,&par_s1_eff[0]);
+
+    float par_s2b_eff[]={162.466,93.368};
+    eff *= get_efficiency_FermiDirac(pulseAreaS2CorB,&par_s2b_eff[0]);
+
+    double new_weight = ReweightingWeight;
+    if(mode == 1 )
+    {
+
+      *(out_reweight + iteration ) = (float)  ReweightingWeight;
+      TotalAcceptance = float(effectiveSimuAccept) * s1s2RangeAccept;
+      *(out_normalization+iteration) =  (float) energy_weight_new * TotalAcceptance * eff; 
+      //*(out_normalization+iteration) =  (float) energy_weight_new * TotalAcceptance; 
+      
+      //fill reweight energy spec
+      int offSetE = 7;
+      if (energy>=minE && energy <=maxE ) 
+      {
+        int binOfE = floorf((energy - minE)/stepE);
+        double* e_address = (double*) ((char*)output_par + ( offSetE + binOfE) * sizeof(double));
+        atomicAdd(e_address, ReweightingWeight); 
+      }
+    }
+    
+
+    //filling ouput 2d histogram
+    //int xBinning = (int)*(output_par+1);
+    //double xMin = (double)*(output_par+2);
+    //double xMax = (double)*(output_par+3);
+    //double xStep = (xMax - xMin)/(double)xBinning;
+    //int yBinning = (int)*(output_par+4);
+    //double yMin = (double)*(output_par+5);
+    //double yMax = (double)*(output_par+6);
+    //double yStep = (yMax - yMin)/(double)yBinning;
+
+    ////get values, overflows and underflows in output[1]-output[9]
+    //double xvalue = (double)pulseAreaS1Cor;
+    //double yvalue = (double)log10f(pulseAreaS2CorB);
+
+    ////printf("I am block%d and thread%d for iteration%d \\n",blockIdx.x, threadIdx.x, iteration);
+    ////float* check_2d = (float*)((char*)output + 1 * xBinning * sizeof(float));
+    ////if (iteration < int(10) )
+    ////{
+    ////    printf("ori: g1, eee, seg, reweighting: %.2f, %.2f, %.2f, %.2f %f\\n",g1,eee,seg,ReweightingWeight, (float) *(check_2d));
+    ////}
+
+
+    //if(xvalue>=xMin && xvalue<xMax && yvalue>=yMin && yvalue<yMax)
+    //{
+    //  int xbin = floorf((xvalue - xMin)/xStep) ;
+    //  int ybin = floorf((yvalue - yMin)/yStep) ;
+    //  double* data_address = (double*) ((char*)output + ybin*xBinning * sizeof(double)) + xbin * sizeof(double);
+    //  atomicAdd(data_address,new_weight);
+    //  atomicAdd(output_par,new_weight);
+
+    //}
 
 
 

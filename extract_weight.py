@@ -1,4 +1,4 @@
-###################################
+
 ## DEMO version for GPU fitting
 ###################################
 ## Created @ Apr. 12th, 2021
@@ -8,7 +8,7 @@
 import numpy as np
 import time
 import math
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 import uproot
 import emcee
 import corner
@@ -31,6 +31,8 @@ start = drv.Event()
 end = drv.Event()
 GPUFunc     = SourceModule(pandax4t_reweight_fitting, no_extern_c=True).get_function("main_reweight_fitting")
 
+GPUFuncRenormalization = SourceModule(pandax4t_reweight_fitting, no_extern_c=True).get_function("renormalization_reweight")
+
 GPUlnLikelihood = SourceModule(pandax4t_reweight_fitting, no_extern_c=True).get_function("ln_likelihood")
 
 file = open('./parameters/p4_run1_tritium_5kV.json')
@@ -38,31 +40,28 @@ config = json.load(file)
 
 #parameters of interest
 pde = np.float32(config['pde'])
-eee = np.float32(config['eee'])
+g2b = np.float32(config['g2b'])
 seg = np.float32(config['seg'])
-s2b_fraction = np.float32(config['s2b_fraction'])
-nuissancePars = np.asarray([pde,eee,seg,s2b_fraction],dtype = np.float32)
+nuissancePars = np.asarray([pde,g2b,seg],dtype = np.float32)
 
-pde_eee_theta = np.float32(config['python3.6']['nuissanceParRelativeUncertainty']['pde_eee_theta'])
+pde_g2b_theta = np.float32(config['python3.6']['nuissanceParRelativeUncertainty']['pde_g2b_theta'])
 nuissanceParsReUnc = np.asarray([config['python3.6']['nuissanceParRelativeUncertainty']['pde'],
-  config['python3.6']['nuissanceParRelativeUncertainty']['eee'],
-  config['python3.6']['nuissanceParRelativeUncertainty']['seg'],
-  config['python3.6']['nuissanceParRelativeUncertainty']['s2b_fraction'] ] ,dtype = np.float32)
+  config['python3.6']['nuissanceParRelativeUncertainty']['g2b'],
+  config['python3.6']['nuissanceParRelativeUncertainty']['seg'] ] ,dtype = np.float32)
 
 def get_ln_nuissance(nuissanceTheta):
   ln = np.double(0.);
-  pde_i,eee_i,seg_i,s2b_fraction_i, = nuissanceTheta
-  re_pde,re_eee,re_seg,re_s2b_fraction = np.divide(nuissanceTheta,nuissancePars)
+  pde_i,g2b_i,seg_i = nuissanceTheta
+  re_pde,re_g2b,re_seg = np.divide(nuissanceTheta,nuissancePars)
   #print(nuissanceParsReUnc,"test nuissance")
-  #re_pde_rotate = (re_pde - 1.) * np.cos(pde_eee_theta) + (re_eee - 1.) * np.sin(pde_eee_theta)
-  #re_eee_rotate = -(re_pde - 1.) * np.sin(pde_eee_theta) + (re_eee - 1.) * np.cos(pde_eee_theta)
-  #print(re_pde_rotate,re_eee_rotate,re_seg,re_s2b_fraction,"test nuissance")
+  #re_pde_rotate = (re_pde - 1.) * np.cos(pde_g2b_theta) + (re_g2b - 1.) * np.sin(pde_g2b_theta)
+  #re_g2b_rotate = -(re_pde - 1.) * np.sin(pde_g2b_theta) + (re_g2b - 1.) * np.cos(pde_g2b_theta)
+  #print(re_pde_rotate,re_g2b_rotate,re_seg,re_s2b_fraction,"test nuissance")
   re_pde_rotate = re_pde
-  re_eee_rotate = re_eee
+  re_g2b_rotate = re_g2b
   ln += -0.5*np.power( (re_pde_rotate )/nuissanceParsReUnc[0],2)
-  ln += -0.5*np.power( (re_eee_rotate )/nuissanceParsReUnc[1],2)
+  ln += -0.5*np.power( (re_g2b_rotate )/nuissanceParsReUnc[1],2)
   ln += -0.5*np.power( (re_seg - 1.0)/ nuissanceParsReUnc[2],2)
-  ln += -0.5*np.power( (re_s2b_fraction - 1.0)/ nuissanceParsReUnc[3],2)
   return ln
 
 
@@ -76,6 +75,14 @@ print('nuissancePars', nuissancePars)
 print('fittingPars',fittingPars)
 
 
+#energy spectrum array initialize
+#minE = np.float32(config['E_eeTh'])
+minE = np.float32(0.)
+maxE = np.float32(config['E_eeMaxSimu']) + 0.1
+stepE = 0.25;
+v_Erange = np.arange(minE,maxE,stepE)
+
+
 #simulation data loading
 oriTreeFile  = config['python3.6']['files']['oriSimuNpz']
 oriTree = np.load(oriTreeFile)
@@ -84,6 +91,8 @@ simu_tree = oriTree['oriTree']
 #simu_tree = np.concatenate((simu_tree,branch_simu_newWeight),axis=1)
 simu_tree_par = np.asarray([simu_tree.shape[0],simu_tree.strides[0]],dtype=np.float32)
 simu_tree_bytes = simu_tree.size * simu_tree.dtype.itemsize
+simu_tree_par     = np.asarray(np.append(simu_tree_par,[stepE,minE,maxE]),dtype=np.float32)
+print('input simu_tree_par shape : ',simu_tree_par)
 
 #boundary conditions
 s1min = np.float32(config['s1min'])
@@ -154,6 +163,11 @@ def get_lnLikelihood(theta):
     ########################################
     global histogram2d_par
     histogram2d_par     = np.asarray(np.append([0.0],binning),dtype=np.double)
+    global v_E
+    v_E = v_Erange[:-1] + 0.5 * stepE
+    v_E_dRdE = np.zeros(v_E.shape,dtype=np.float32)
+    print('v_E shape: ',v_E_dRdE.shape[0])
+    histogram2d_par     = np.append( histogram2d_par, v_E_dRdE)
 
     #print("dtype check ",histogram2d_par.dtype)
     #histogram2d_par = np.append(histogram2d_par, binning)
@@ -167,11 +181,16 @@ def get_lnLikelihood(theta):
     start.record()
     #simu_tree_gpu = drv.mem_alloc(simu_tree_bytes)
     #drv.memcpy_htod(simu_tree_gpu,simu_tree)
+    global out_weight
+    out_weight = np.zeros(simu_tree.shape[0],dtype = np.float32)
+    global out_normalization
+    out_normalization = np.zeros(simu_tree.shape[0],dtype = np.float32)
     mode = np.uint(1)
     tArgs               = [
         drv.In(par_array),
-        drv.InOut(simu_tree), drv.In(simu_tree_par),
+        drv.In(simu_tree), drv.In(simu_tree_par),
         drv.InOut(histogram2d), drv.InOut(histogram2d_par),
+        drv.InOut(out_weight),drv.InOut(out_normalization),
         mode
     ]
 
@@ -179,8 +198,26 @@ def get_lnLikelihood(theta):
     GPUFunc(*tArgs, **d_gpu_scale)
     #end.record()
     drv.Context.synchronize()
-    return histogram2d_par[0] 
+    v_E_dRdE = histogram2d_par[7:]
+    v_E_dRdE = np.asarray(np.append([v_E_dRdE.shape[0]],v_E_dRdE), dtype = np.float32)
+    v_E = np.asarray(np.append([v_E.shape[0]],v_E),dtype = np.float32)
+    print('v_E_dRdE ',v_E_dRdE)
+    print('v_E ',v_E)
 
+    histogram2d = histogram2d * 0.;
+    histogram2d_par = histogram2d_par[:7]
+    histogram2d_par[0] = 0.
+    print('check dtype ', simu_tree.dtype,histogram2d_par.dtype)
+    tArgsR = [ 
+      drv.In(v_E),drv.In(v_E_dRdE),
+      drv.In(simu_tree), drv.In(simu_tree_par),
+      drv.InOut(out_weight),drv.In(out_normalization),
+      drv.InOut(histogram2d), drv.InOut(histogram2d_par),
+    ]
+    GPUFuncRenormalization(*tArgsR , **d_gpu_scale)
+    drv.Context.synchronize()
+    return histogram2d_par[0] 
+    
 
 def get_lnprob(theta):
     NoNui=nuissancePars.shape[0]
@@ -197,14 +234,14 @@ def get_newWeight(theta,filename):
     x0 = np.linspace(xmin,xmax,num=np.int(xbin))
     y0 = np.linspace(ymin,ymax,num=np.int(ybin))
     xv, yv = np.meshgrid(x0,y0)
-    c =plt.pcolor(xv,yv,histogram2d,cmap='magma',vmin=0, vmax = histogram2d.max())
-    plt.axis([xmin,xmax,ymin,ymax])
-    plt.colorbar(c)
+    #c =plt.pcolor(xv,yv,histogram2d,cmap='magma',vmin=0, vmax = histogram2d.max())
+    #plt.axis([xmin,xmax,ymin,ymax])
+    #plt.colorbar(c)
     print("likelihood_output: ",likelihood)
     #plt.show()
-    np.savez(filename,histogram2d=histogram2d,qmc_tree=simu_tree,pars=theta)
-    plt.savefig('bestFitting.png')
+    np.savez(filename,histogram2d=histogram2d,qmc_tree=simu_tree,pars=theta,v_E=v_E,v_E_dRdE = histogram2d_par[7:],new_weight=out_weight,normalization = out_normalization)
+    #plt.savefig('bestFitting.png')
 
 
 outFile = config['python3.6']['files']['bestNpz']
-get_newWeight([0.1,0.6584,19.7444,0.28969,0.1361,-0.005718727,1.83,33.7],outFile)
+get_newWeight([0.1,4,21.32,0,0,0,1.,27.222],outFile)

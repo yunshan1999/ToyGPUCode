@@ -40,8 +40,8 @@ GPUFunc     = SourceModule(pandax4t_signal_sim, no_extern_c=True).get_function("
 # define a input array under cpu level
 gpu_seed            = int(time.time()*100)
 #some initial values
-num_trials          = 2**24
-branch              = 25 #branch for output data
+num_trials          = 2**23
+branch              = 40 #branch for output data
 
 GPUSeed             = np.asarray(gpu_seed, dtype=np.int32)
 
@@ -72,8 +72,8 @@ for attri,luRange in config['python3.6']['fittingParSpace'].items():
   a = np.asarray(luRange,dtype=np.float32)
   v_variables = np.append(v_variables,a)
 
-v_variables = v_variables.reshape((rowNo,2))
-print(v_variables)
+best_variable = np.asarray([0.1,4,21.32,0.,0.,0.,1.,27.222],dtype = np.float32)
+v_variables = best_variable 
 
 
 # important step, need to push (or copy) it to GPU memory so that GPU function can use it
@@ -82,11 +82,11 @@ minE = config['E_eeTh']
 maxE = config['E_eeMaxSimu']
 const_pars = np.asarray([num_trials,n_elife,minE,maxE],dtype=np.float32)
 print(const_pars)
-mode=np.uint(0)
+mode=np.uint(1)
 tArgs               = [
     drv.In(GPUSeed),
     drv.In(const_pars),
-    drv.In(v_variables),
+    drv.In(v_variables.T),
     drv.In(elife),drv.In(elife_duration),
     drv.InOut(output_array),stride_output_array,N_output_array,mode
 ]
@@ -97,7 +97,7 @@ tArgs               = [
 # HARDCODE WARNING
 d_gpu_scale = {}
 #Maximum grid dimensions: 	2147483647, 65535, 65535
-nThreads = 256
+nThreads = 128
 d_gpu_scale['block'] = (nThreads, 1, 1)
 numBlocks = np.floor(float(num_trials) / np.power(float(nThreads), 1.))
 d_gpu_scale['grid'] = (int(numBlocks), 1)
@@ -114,7 +114,7 @@ secs = start.time_till(end)*1e-3
 run_time = time.time() - start_time
 print("GPU run time %f seconds " % secs)
 print(output_array[1])
-outputfile = config['python3.6']['files']['oriSimuNpz']
+outputfile = config['python3.6']['files']['oriBestSimuNpz']
 np.savez(outputfile,oriTree=output_array)
 #np.savetxt("./outputs/outputs_gpu.txt",output_array)
 #time.sleep(5)
