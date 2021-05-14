@@ -127,13 +127,13 @@ def get_lnlikelihood(theta):
         inds = np.where((cS1>=2)&(cS1<120.)&(np.log10(cS2b)<3.5))[0]
         cS1 = np.array(cS1[inds])
         cS2b = np.array(cS2b[inds])
-        events_for_delete = [513, 537, 681, 705, 817, 964, 1072, 1197, 1269]
+        events_for_delete = [10   ,19   ,22   ,24   ,26   ,46   ,50   ,56  , 60  ,67   ,69  , 76  ,105  ,132, 138 , 168 , 170 , 172 , 183 , 208 , 209 , 232,  242, 247 , 251,  253, 263,  279,293 , 309 , 312 , 328 , 339 , 348 , 406 , 411,  415, 446 , 470,  471,  513,  528,537 , 540 , 564 , 571 , 609 , 613 , 653 , 681,  697, 705 , 717,  742,  786,  817, 877 , 888 , 912 , 913 , 914 , 953 , 964 , 969,  992,1004 ,1016, 1029, 1040, 1065, 1072 ,1080 ,1091 ,1094 ,1114 ,1141 ,1153 ,1155, 1175,1188 ,1192, 1193, 1196, 1197, 1201 ,1212 ,1214 ,1258 ,1269 ,1284]
         new_cS1 = np.delete(cS1, events_for_delete)
         new_cS2b = np.delete(cS2b, events_for_delete)
         bin_inds = get_bin_num(new_cS1,np.log10(new_cS2b),binning)
         lnLikelihood_total=np.sum(np.log(hmc[bin_inds]/Nmc))
         #lnL_time = time.time()-lnL_starter
-        #print(f"lnL in this step is {lnL_time:1.3e}")
+       # print(f"lnL in this step is {lnL_time:1.3e}")
         return lnLikelihood_total
 
 def get_lnprior(theta):
@@ -158,9 +158,11 @@ ndim = ndim_nonzero + ndim_zero
 updateFlag = False
 scaleFactor = 1.
 #p0a = [np.concatenate(nuisance_mean,np.asarray([20.,1.],np.float32))*(1 + 0.1*np.random.randn(ndim_nonzero)) for i in range(nwalkers)]
-p0a = [[nuisance_mean[0], nuisance_mean[1], nuisance_mean[2], 20., 1.]*(1 + 0.1*np.random.randn(ndim_nonzero)) for i in range(nwalkers)]
-p0b = [[0., 0., 0.] + 0.05*np.random.randn(ndim_zero) for i in range(nwalkers)]
-p0 = np.concatenate((p0a, p0b), axis=1)
+#p0a = [[nuisance_mean[0], nuisance_mean[1], nuisance_mean[2], 20., 1.]*(1 + 0.1*np.random.randn(ndim_nonzero)) for i in range(nwalkers)]
+#p0b = [[0., 0., 0.] + 0.05*np.random.randn(ndim_zero) for i in range(nwalkers)]
+par_bestfit = np.loadtxt(PATH+'bestfit.dat')[1].T
+p0 = [par_bestfit * (1+0.1*np.random.randn(ndim)) for i in range(nwalkers)]
+#p0 = np.concatenate((p0a, p0b), axis=1)
 # get walkers initial positions from the last run
 #samplesFromLastRun = np.loadtxt("./outputs/samples.dat")
 #samplesFromLastRunOriginal = samplesFromLastRun.reshape(samplesFromLastRun.shape[0], samplesFromLastRun.shape[1] // ndim, ndim)
@@ -202,7 +204,7 @@ if updateFlag:
 
 else:
     sampler = emcee.EnsembleSampler(nwalkers, ndim, get_lnprob, args=(scaleFactor,))
-    sampler.run_mcmc(p0,4000)
+    sampler.run_mcmc(p0, 4000, progress = True)
     samples = sampler.chain
     lnls = sampler.lnprobability
 

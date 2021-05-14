@@ -15,10 +15,11 @@ pandax4t_signal_sim = """
 extern "C" {
 __device__ float gpu_truncated_gaussian(curandState_t *rand_state, float mean, float sigma, float lower, float upper)
 {
-    float x = lower;
-    while(x>=upper||x<=lower)
+    float x = mean;
+    for(int i=0;i<1e2;i++)
     {
         x = curand_normal(rand_state)*sigma + mean;
+        if (x<upper && x>lower) break;
     }
     return x;
 }
@@ -70,6 +71,13 @@ __device__ float interpolate1d(float x, float * array_x, float * array_y){
         }
 
     }
+}
+
+__device__ float legendreSeries(float xx, float *par ){
+    //ATTENTION:normX is energymax, please remember to change it once the input fitting energy range is different//
+    float normX = 70.;
+    float fluc = 1. * ( par[5] + par[6] * xx / normX + par[7] * (0.5*(3*xx*xx/normX/normX - 1.)) );
+    return fluc;
 }
 
 __device__ float get_tritium_energy_weight(float energy, float * nuisance_par){
@@ -136,11 +144,8 @@ __device__ void get_yield_pars(bool simuTypeNR, float E_drift, float energy, flo
         pars[0] = Wq_eV;
         pars[1] = L;
         pars[2] = NexONi;
-        pars[3] = rmean + free_pars[5] + free_pars[6]*energy + free_pars[7]*energy*energy;
+        pars[3] = rmean + legendreSeries(energy, &free_pars[0]);
         pars[4] = omega * free_pars[4];
-        if(pars[3]<0.)pars[3] = 0.;
-        if(pars[3]>1.)pars[3] = 1.;
-        if(pars[4]<0.)pars[4] = 0.;
         return;
     }
     else{
@@ -195,11 +200,8 @@ __device__ void get_yield_pars(bool simuTypeNR, float E_drift, float energy, flo
         pars[0] = Wq_eV;
         pars[1] = 1.;
         pars[2] = NexONi;
-        pars[3] = rmean + free_pars[5] + free_pars[6]*energy + free_pars[7]*energy*energy;
+        pars[3] = rmean + legendreSeries(energy, &free_pars[0]);
         pars[4] = omega * free_pars[4];
-        if(pars[3]<0.)pars[3] = 0.;
-        if(pars[3]>1.)pars[3] = 1.;
-        if(pars[4]<0.)pars[4] = 0.;
         return;
     }
 }
@@ -400,6 +402,8 @@ __global__ void signal_simulation(
     float NexONi = pars[2];
     float rmean = pars[3];
     float deltaR = pars[4];
+    if(rmean<0.)return;
+    else if(rmean>1.)return;
 
     //let the simulation begin
 
@@ -420,9 +424,9 @@ __global__ void signal_simulation(
     int Nex = Nq - Ni;
 
     // 5) get recomb fraction fluctuation
-    float r = curand_normal(&s)*deltaR + rmean;
-    if(r >= 1. )r = 1.;
-    else if(r <= 0.)r = 0.;
+    float r = gpu_truncated_gaussian(&s, rmean, deltaR, 0., 1.);
+    if(r<0.)return;
+    else if(r>1.)return;
 
     // 6) get photon and electron numbers
     int Ne = gpu_binomial(&s, Ni, 1 - r);
