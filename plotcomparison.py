@@ -5,12 +5,13 @@ from scipy.stats.distributions import chi2
 from matplotlib.ticker import FixedLocator, FixedFormatter
 
 def chi2test(data, exp):
-    chisquare = np.sum(np.square(data-exp)/exp)
-    dof = data.shape[0] - 1
+    inds = np.where((exp > 0.)&(data > 0.))[0]
+    chisquare = np.sum(np.square(data[inds]-exp[inds])/exp[inds])
+    dof = data[inds].shape[0] - 1
     return chisquare, chi2.sf(chisquare, dof), dof
 
-PATH = '../FittingGPU_9p/outputs/'
-ROOT_PATH = '../FittingGPU_9p/data/reduce_ana3_p4_run1_tritium_5kV.root'
+PATH = '../FittingGPU/outputs/'
+ROOT_PATH = '/home/yunshan/data/reduce_ana3_p4_run1_tritium_5kV.root'
 
 ana_tree = uproot.open(ROOT_PATH)["out_tree"]
 
@@ -23,38 +24,30 @@ N = 2**20
 
 ##define cuts and hist min&max ##
 s1min, s1max, s1step = 2.,120.,2.
-s2min, s2max, s2step = 0., 3000., 60.
+s2min, s2max, s2step = 0., np.power(10.,3.5), 60.
 new_ticks = np.linspace(s2min, s2max, 7)
 #new_ticks = new_ticks.tolist()
 
-cS1mm = mc_outputs[3*N:4*N]
-cS2mm = mc_outputs[4*N:5*N]
-wmm = mc_outputs[5*N:6*N]
+cS1mm = mc_outputs[0*N:1*N]
+cS2mm = mc_outputs[1*N:2*N]
+wmm = mc_outputs[2*N:3*N]
 
 #to record the data&mc with applied cut
-cS1d = []
-cS2d = []
-cS1m = []
-cS2m = []
-wm = []
+inds_d = np.where((cS1dd>=2)&(cS1dd<120.)&(cS2dd<np.power(10.,3.5)))[0]
+inds_m = np.where((cS1mm>=2)&(cS1mm<120.)&(cS2mm<np.power(10.,3.5)))[0]
+cS1d = cS1dd[inds_d]
+cS2d = cS2dd[inds_d]
+cS1m = cS1mm[inds_m]
+cS2m = cS2mm[inds_m]
+wm = wmm[inds_m]
 
-for i in range(len(cS1dd)):
-    if cS1dd[i]>s1min and cS1dd[i]<s1max:
-        cS1d.append(cS1dd[i])
-        cS2d.append(cS2dd[i])
-for i in range(len(cS1mm)):
-    if cS1mm[i]>s1min and cS1mm[i]<s1max:
-        cS1m.append(cS1mm[i])
-        cS2m.append(cS2mm[i])        
-        wm.append(wmm[i])
-        
+#outliers data with small likelihoods#
+#inds_out = [10   ,19   ,22  , 24  , 26  , 46  , 50   ,56   ,60   ,67   ,69   ,76  ,105  ,132,138 , 168 , 170,  172,  183,  208,  209 , 232 , 242 , 247 , 251 , 253,  263,  279,  293 , 309 , 312,  328,  339,  348,  406 , 411 , 415 , 446 , 470 , 471,  513,  528,  537 , 540 , 564,  571,  609,  613,  653 , 681 , 697 , 705 , 717 , 742,  786,  817,  877 , 888 , 912,  913,  914,  953,  964 , 969 , 992 ,1004 ,1016 ,1029, 1040, 1065,1072 ,1080 ,1091, 1094, 1114, 1141, 1153 ,1155 ,1175 ,1188 ,1192 ,1193, 1196, 1197, 1201 ,1212 ,1214, 1258, 1269, 1284]
 cS1d = np.array(cS1d)
 cS2d = np.array(cS2d)
-cS1m = np.array(cS1m)
-cS2m = np.array(cS2m)
-wm = np.array(wm)
 
-
+#cS1d = np.delete(cS1d, inds_out)
+#cS2d = np.delete(cS2d, inds_out)
 ##cS1 comparison plotter##
 
 binning_s1 = np.arange(s1min,s1max+s1step,s1step)
@@ -83,7 +76,7 @@ binning_s1 -= s1step*0.5
 
 plt.errorbar(binning_s1, bincontentd, yerr=errd,color='black', linewidth = 0.3, fmt="none")
 chisquare, p, dof = chi2test(bincontentd, bincontentm)
-#plt.title('cS1'+' chi2='+str(chisquare)+', p='+str(p)+', dof='+str(dof))
+#plt.title('cS1'+' chi2='+str(chisquare)+', p='+str(p)+', dof='+str(dof), fontsize=6)
 plt.title('cS1')
 plt.legend(loc='upper right', fontsize=5)
 plt.savefig(PATH+'cS1.pdf')
@@ -123,7 +116,7 @@ binning_s2 -= s2step*0.5
 plt.errorbar(binning_s2, bincontentd, yerr=errd,color='black',linewidth = 0.3, fmt="none")
 plt.legend(loc='upper right', fontsize=5)
 chisquare, p, dof = chi2test(bincontentd, bincontentm)
-#plt.title('cS2'+' chi2='+str(chisquare)+', p='+str(p)+', dof='+str(dof))
+#plt.title('cS2b'+' chi2='+str(chisquare)+', p='+str(p)+', dof='+str(dof), fontsize=6)
 plt.title('cS2b')
 plt.savefig(PATH+'cS2b.pdf')
 plt.cla()
@@ -178,8 +171,8 @@ binning_s2 -= s2step*0.5
 
 axs[0, 0].errorbar(binning_s2, bincontentd, yerr=errd,color='black',linewidth = 0.3, fmt="none")
 axs[0, 0].legend(loc='upper right', fontsize=5)
-#chisquare, p, dof = chi2test(bincontentd, bincontentm)
-#plt.title('cS2_region1'+' chi2='+str(chisquare)+', p='+str(p)+', dof='+str(dof))
+chisquare, p, dof = chi2test(bincontentd, bincontentm)
+#axs[0, 0].set_title('cS2b_cS1[2, 10]'+' chi2='+str(chisquare)+', p='+str(p)+', dof='+str(dof), fontsize=6)
 axs[0, 0].set_title('cS2b_cS1[2, 10]',fontsize=7)
 axs[0, 0].set_xticks(np.linspace(s2min, s2max, 7))
 axs[0, 0].tick_params(labelsize=4)
@@ -214,7 +207,8 @@ binning_s2 -= s2step*0.5
 
 axs[0, 1].errorbar(binning_s2, bincontentd, yerr=errd,color='black',linewidth = 0.3, fmt="none")
 axs[0, 1].legend(loc='upper right', fontsize=5)
-#chisquare, p, dof = chi2test(bincontentd, bincontentm)
+chisquare, p, dof = chi2test(bincontentd, bincontentm)
+#axs[0, 1].set_title('cS2b_cS1[10, 20]'+' chi2='+str(chisquare)+', p='+str(p)+', dof='+str(dof), fontsize=6)
 #plt.title('cS2_region1'+' chi2='+str(chisquare)+', p='+str(p)+', dof='+str(dof))
 axs[0, 1].set_title('cS2b_cS1[10, 20]',fontsize=7)
 axs[0, 1].set_xticks(np.linspace(s2min, s2max, 7))
@@ -250,9 +244,10 @@ binning_s2 -= s2step*0.5
 
 axs[0, 2].errorbar(binning_s2, bincontentd, yerr=errd,color='black',linewidth = 0.3, fmt="none")
 axs[0, 2].legend(loc='upper right', fontsize=5)
-#chisquare, p, dof = chi2test(bincontentd, bincontentm)
+chisquare, p, dof = chi2test(bincontentd, bincontentm)
 #plt.title('cS2_region1'+' chi2='+str(chisquare)+', p='+str(p)+', dof='+str(dof))
 axs[0, 2].set_title('cS2b_cS1[20, 30]',fontsize=7)
+#axs[0, 2].set_title('cS2b_cS1[20, 30]'+' chi2='+str(chisquare)+', p='+str(p)+', dof='+str(dof), fontsize=6)
 axs[0, 2].set_xticks(np.linspace(s2min, s2max, 7))
 axs[0, 2].tick_params(labelsize=4)
 #x_formatter = FixedFormatter(new_ticks)
@@ -286,7 +281,8 @@ binning_s2 -= s2step*0.5
 
 axs[1, 0].errorbar(binning_s2, bincontentd, yerr=errd,color='black',linewidth = 0.3, fmt="none")
 axs[1, 0].legend(loc='upper right', fontsize=5)
-#chisquare, p, dof = chi2test(bincontentd, bincontentm)
+chisquare, p, dof = chi2test(bincontentd, bincontentm)
+#axs[1, 0].set_title('cS2b_cS1[30, 40]'+' chi2='+str(chisquare)+', p='+str(p)+', dof='+str(dof), fontsize=6)
 #plt.title('cS2_region1'+' chi2='+str(chisquare)+', p='+str(p)+', dof='+str(dof))
 axs[1, 0].set_title('cS2b_cS1[30, 40]',fontsize=7)
 axs[1, 0].set_xticks(np.linspace(s2min, s2max, 7))
@@ -322,7 +318,8 @@ binning_s2 -= s2step*0.5
 
 axs[1, 1].errorbar(binning_s2, bincontentd, yerr=errd,color='black',linewidth = 0.3, fmt="none")
 axs[1, 1].legend(loc='upper right', fontsize=5)
-#chisquare, p, dof = chi2test(bincontentd, bincontentm)
+chisquare, p, dof = chi2test(bincontentd, bincontentm)
+#axs[1, 1].set_title('cS2b_cS1[40, 50]'+' chi2='+str(chisquare)+', p='+str(p)+', dof='+str(dof), fontsize=6)
 #plt.title('cS2_region1'+' chi2='+str(chisquare)+', p='+str(p)+', dof='+str(dof))
 axs[1, 1].set_title('cS2b_cS1[40, 50]',fontsize=7)
 axs[1, 1].set_xticks(np.linspace(s2min, s2max, 7))
@@ -358,7 +355,8 @@ binning_s2 -= s2step*0.5
 
 axs[1, 2].errorbar(binning_s2, bincontentd, yerr=errd,color='black',linewidth = 0.3, fmt="none")
 axs[1, 2].legend(loc='upper right', fontsize=5)
-#chisquare, p, dof = chi2test(bincontentd, bincontentm)
+chisquare, p, dof = chi2test(bincontentd, bincontentm)
+#axs[1, 2].set_title('cS2b_cS1[50, 60]'+' chi2='+str(chisquare)+', p='+str(p)+', dof='+str(dof), fontsize=6)
 #plt.title('cS2_region1'+' chi2='+str(chisquare)+', p='+str(p)+', dof='+str(dof))
 axs[1, 2].set_title('cS2b_cS1[50, 60]',fontsize=7)
 axs[1, 2].set_xticks(np.linspace(s2min, s2max, 7))
@@ -394,7 +392,8 @@ binning_s2 -= s2step*0.5
 
 axs[2, 0].errorbar(binning_s2, bincontentd, yerr=errd,color='black',linewidth = 0.3, fmt="none")
 axs[2, 0].legend(loc='upper right', fontsize=5)
-#chisquare, p, dof = chi2test(bincontentd, bincontentm)
+chisquare, p, dof = chi2test(bincontentd, bincontentm)
+#axs[2, 0].set_title('cS2b_cS1[60, 80]'+' chi2='+str(chisquare)+', p='+str(p)+', dof='+str(dof), fontsize=6)
 #plt.title('cS2_region1'+' chi2='+str(chisquare)+', p='+str(p)+', dof='+str(dof))
 axs[2, 0].set_title('cS2b_cS1[60, 80]',fontsize=7)
 axs[2, 0].set_xticks(np.linspace(s2min, s2max, 7))
@@ -430,7 +429,8 @@ binning_s2 -= s2step*0.5
 
 axs[2, 1].errorbar(binning_s2, bincontentd, yerr=errd,color='black',linewidth = 0.3, fmt="none")
 axs[2, 1].legend(loc='upper right', fontsize=5)
-#chisquare, p, dof = chi2test(bincontentd, bincontentm)
+chisquare, p, dof = chi2test(bincontentd, bincontentm)
+#axs[2, 1].set_title('cS2b_cS1[80, 100]'+' chi2='+str(chisquare)+', p='+str(p)+', dof='+str(dof), fontsize=6)
 #plt.title('cS2_region1'+' chi2='+str(chisquare)+', p='+str(p)+', dof='+str(dof))
 axs[2, 1].set_title('cS2b_cS1[80, 100]',fontsize=7)
 axs[2, 1].set_xticks(np.linspace(s2min, s2max, 7))
@@ -466,9 +466,10 @@ binning_s2 -= s2step*0.5
 
 axs[2, 2].errorbar(binning_s2, bincontentd, yerr=errd,color='black',linewidth = 0.3, fmt="none")
 axs[2, 2].legend(loc='upper right', fontsize=5)
-#chisquare, p, dof = chi2test(bincontentd, bincontentm)
+chisquare, p, dof = chi2test(bincontentd, bincontentm)
+#axs[2, 2].set_title('cS2b_cS1[100, 120]'+' chi2='+str(chisquare)+', p='+str(p)+', dof='+str(dof), fontsize=6)
 #plt.title('cS2_region1'+' chi2='+str(chisquare)+', p='+str(p)+', dof='+str(dof))
-axs[2, 2].set_title('cS2b_cS1[80, 100]',fontsize=7)
+axs[2, 2].set_title('cS2b_cS1[100, 120]',fontsize=7)
 axs[2, 2].set_xticks(np.linspace(s2min, s2max, 7))
 axs[2, 2].tick_params(labelsize=4)
 #x_formatter = FixedFormatter(new_ticks)

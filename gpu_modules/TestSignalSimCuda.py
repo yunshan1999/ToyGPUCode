@@ -15,10 +15,11 @@ pandax4t_signal_sim = """
 extern "C" {
 __device__ float gpu_truncated_gaussian(curandState_t *rand_state, float mean, float sigma, float lower, float upper)
 {
-    float x = lower;
-    while(x>=upper||x<=lower)
+    float x = mean;
+    for(int i=0;i<1e2;i++)
     {
         x = curand_normal(rand_state)*sigma + mean;
+        if (x<upper && x>lower) break;
     }
     return x;
 }
@@ -72,6 +73,13 @@ __device__ float interpolate1d(float x, float * array_x, float * array_y){
     }
 }
 
+__device__ float legendreSeries(float xx, float *par ){
+    //ATTENTION:normX is energymax, please remember to change it once the input fitting energy range is different//
+    float normX = 70.;
+    float fluc = 1. * ( par[5] + par[6] * xx / normX + par[7] * (0.5*(3*xx*xx/normX/normX - 1.)) );
+    return fluc;
+}
+
 __device__ float get_tritium_energy_weight(float energy, float * nuisance_par){
 
     float flat = nuisance_par[3]; 
@@ -83,8 +91,103 @@ __device__ float get_tritium_energy_weight(float energy, float * nuisance_par){
     float E = T + m; 
     float eta = 2.*1./137*E/P; 
     float F = 2*pi*eta/(1-exp(-2*pi*eta)); 
-    return double(F * P * E * (Q - T) * (Q - T) * 0.00001 + flat);
+    return float(F * P * E * (Q - T) * (Q - T) * 0.00001 + flat);
 }
+
+__device__ float get_ambe_energy_weight(float energy){
+
+    float e[] = {92,
+        8.2000e-01, 2.4600e+00, 4.1000e+00, 5.7400e+00, 7.3800e+00,
+        9.0200e+00, 1.0660e+01, 1.2300e+01, 1.3940e+01, 1.5580e+01,
+        1.7220e+01, 1.8860e+01, 2.0500e+01, 2.2140e+01, 2.3780e+01,
+        2.5420e+01, 2.7060e+01, 2.8700e+01, 3.0340e+01, 3.1980e+01,
+        3.3620e+01, 3.5260e+01, 3.6900e+01, 3.8540e+01, 4.0180e+01,
+        4.1820e+01, 4.3460e+01, 4.5100e+01, 4.6740e+01, 4.8380e+01,
+        5.0020e+01, 5.1660e+01, 5.3300e+01, 5.4940e+01, 5.6580e+01,
+        5.8220e+01, 5.9860e+01, 6.1500e+01, 6.3140e+01, 6.4780e+01,
+        6.6420e+01, 6.8060e+01, 6.9700e+01, 7.1340e+01, 7.2980e+01,
+        7.4620e+01, 7.6260e+01, 7.7900e+01, 7.9540e+01, 8.1180e+01,
+        8.2820e+01, 8.4460e+01, 8.6100e+01, 8.7740e+01, 8.9380e+01,
+        9.1020e+01, 9.2660e+01, 9.4300e+01, 9.5940e+01, 9.7580e+01,
+        9.9220e+01, 1.0086e+02, 1.0250e+02, 1.0414e+02, 1.0578e+02,
+        1.0742e+02, 1.0906e+02, 1.1070e+02, 1.1234e+02, 1.1398e+02,
+        1.1562e+02, 1.1726e+02, 1.1890e+02, 1.2054e+02, 1.2218e+02,
+        1.2382e+02, 1.2546e+02, 1.2710e+02, 1.2874e+02, 1.3038e+02,
+        1.3202e+02, 1.3366e+02, 1.3530e+02, 1.3694e+02, 1.3858e+02,
+        1.4022e+02, 1.4186e+02, 1.4350e+02, 1.4514e+02, 1.4678e+02,
+        1.4842e+02, 1.5006e+02};
+
+    float weight[] = {92,
+        2.1748e+04, 2.8360e+04, 2.2173e+04, 1.7618e+04, 1.4038e+04,
+        1.1716e+04, 9.9760e+03, 8.2930e+03, 7.5350e+03, 6.6060e+03,
+        5.8890e+03, 5.3970e+03, 5.1050e+03, 4.5640e+03, 4.1390e+03,
+        3.8990e+03, 3.8200e+03, 3.6050e+03, 3.3310e+03, 3.2890e+03,
+        3.0820e+03, 3.0340e+03, 2.9360e+03, 2.8370e+03, 2.6960e+03,
+        2.6340e+03, 2.5510e+03, 2.5480e+03, 2.4660e+03, 2.3110e+03,
+        2.3820e+03, 2.4820e+03, 2.3580e+03, 2.3020e+03, 2.1820e+03,
+        2.2370e+03, 2.1710e+03, 2.1380e+03, 2.0880e+03, 1.9790e+03,
+        1.9400e+03, 1.8850e+03, 1.8900e+03, 1.8010e+03, 1.6870e+03,
+        1.7280e+03, 1.7270e+03, 1.6120e+03, 1.6110e+03, 1.5540e+03,
+        1.5620e+03, 1.5050e+03, 1.4150e+03, 1.3790e+03, 1.4230e+03,
+        1.3490e+03, 1.2850e+03, 1.2960e+03, 1.2530e+03, 1.2450e+03,
+        1.1410e+03, 1.1260e+03, 1.0840e+03, 1.0620e+03, 1.0530e+03,
+        9.8500e+02, 9.5200e+02, 9.6100e+02, 8.3700e+02, 8.3800e+02,
+        8.2600e+02, 8.3000e+02, 8.1600e+02, 7.2300e+02, 7.0900e+02,
+        7.2400e+02, 7.2100e+02, 6.5100e+02, 6.5000e+02, 6.1000e+02,
+        5.9100e+02, 5.5900e+02, 5.9900e+02, 5.4800e+02, 5.5500e+02,
+        5.1500e+02, 4.9400e+02, 4.9300e+02, 4.9000e+02, 4.5600e+02,
+        4.2600e+02, 1.8700e+02};
+
+    return interpolate1d(energy, e, weight);
+}
+
+__device__ float get_dd_energy_weight(float energy){
+
+    float e[] = {92, 
+        8.2000e-01, 2.4600e+00, 4.1000e+00, 5.7400e+00, 7.3800e+00,
+        9.0200e+00, 1.0660e+01, 1.2300e+01, 1.3940e+01, 1.5580e+01,
+        1.7220e+01, 1.8860e+01, 2.0500e+01, 2.2140e+01, 2.3780e+01,
+        2.5420e+01, 2.7060e+01, 2.8700e+01, 3.0340e+01, 3.1980e+01,
+        3.3620e+01, 3.5260e+01, 3.6900e+01, 3.8540e+01, 4.0180e+01,
+        4.1820e+01, 4.3460e+01, 4.5100e+01, 4.6740e+01, 4.8380e+01,
+        5.0020e+01, 5.1660e+01, 5.3300e+01, 5.4940e+01, 5.6580e+01,
+        5.8220e+01, 5.9860e+01, 6.1500e+01, 6.3140e+01, 6.4780e+01,
+        6.6420e+01, 6.8060e+01, 6.9700e+01, 7.1340e+01, 7.2980e+01,
+        7.4620e+01, 7.6260e+01, 7.7900e+01, 7.9540e+01, 8.1180e+01,
+        8.2820e+01, 8.4460e+01, 8.6100e+01, 8.7740e+01, 8.9380e+01,
+        9.1020e+01, 9.2660e+01, 9.4300e+01, 9.5940e+01, 9.7580e+01,
+        9.9220e+01, 1.0086e+02, 1.0250e+02, 1.0414e+02, 1.0578e+02,
+        1.0742e+02, 1.0906e+02, 1.1070e+02, 1.1234e+02, 1.1398e+02,
+        1.1562e+02, 1.1726e+02, 1.1890e+02, 1.2054e+02, 1.2218e+02,
+        1.2382e+02, 1.2546e+02, 1.2710e+02, 1.2874e+02, 1.3038e+02,
+        1.3202e+02, 1.3366e+02, 1.3530e+02, 1.3694e+02, 1.3858e+02,
+        1.4022e+02, 1.4186e+02, 1.4350e+02, 1.4514e+02, 1.4678e+02,
+        1.4842e+02, 1.5006e+02};
+
+    float weight[] = {92,
+        2.5736e+04, 1.0987e+04, 8.7190e+03, 6.9790e+03, 5.8670e+03,
+        5.1280e+03, 4.6430e+03, 4.3490e+03, 4.1020e+03, 3.9510e+03,
+        3.6720e+03, 3.8350e+03, 3.6420e+03, 3.4850e+03, 3.4900e+03,
+        3.2930e+03, 3.1170e+03, 3.0590e+03, 3.0450e+03, 3.0470e+03,
+        2.9490e+03, 3.0900e+03, 2.9970e+03, 3.0960e+03, 2.9990e+03,
+        3.0260e+03, 3.2100e+03, 3.2740e+03, 3.5400e+03, 3.7570e+03,
+        4.0750e+03, 4.4050e+03, 4.7240e+03, 5.0060e+03, 5.4040e+03,
+        5.7240e+03, 6.0560e+03, 6.7840e+03, 7.4180e+03, 7.6710e+03,
+        6.4560e+03, 3.9370e+03, 3.0010e+03, 2.7050e+03, 2.3720e+03,
+        2.2560e+03, 2.0840e+03, 1.9320e+03, 1.7770e+03, 1.6570e+03,
+        1.5000e+03, 1.3680e+03, 1.2840e+03, 1.1750e+03, 1.1510e+03,
+        1.0580e+03, 1.0010e+03, 1.0240e+03, 9.3500e+02, 9.2500e+02,
+        8.4800e+02, 8.4700e+02, 7.9100e+02, 6.9900e+02, 8.0100e+02,
+        6.8900e+02, 7.2400e+02, 6.5000e+02, 5.7300e+02, 5.5000e+02,
+        5.7600e+02, 5.6600e+02, 5.0600e+02, 4.9900e+02, 4.9000e+02,
+        4.3300e+02, 4.3700e+02, 4.3000e+02, 4.6500e+02, 3.9300e+02,
+        4.1100e+02, 3.6200e+02, 3.7700e+02, 3.6800e+02, 3.4800e+02,
+        3.2100e+02, 3.1900e+02, 2.7700e+02, 2.8500e+02, 2.5900e+02,
+        2.7000e+02, 1.2400e+02};
+    
+    return interpolate1d(energy, e, weight);
+}
+
 
 __device__ float get_fano_factor(bool simuTypeNR, float density, int Nq_mean, float E_drift){
     if(simuTypeNR){
@@ -132,15 +235,12 @@ __device__ void get_yield_pars(bool simuTypeNR, float E_drift, float energy, flo
         float FreeParam[] = {1.,1.,0.1,0.5,0.19,2.25};
         float omega = FreeParam[2] * expf(-0.5 * powf(elecFrac - FreeParam[3],2.)/(FreeParam[4] * FreeParam[4]));
         if(omega < 0.)omega = 0.;
-        double L = (Nq / energy) * Wq_eV * 1e-3;
+        float L = (Nq / energy) * Wq_eV * 1e-3;
         pars[0] = Wq_eV;
         pars[1] = L;
         pars[2] = NexONi;
-        pars[3] = rmean + free_pars[5] + free_pars[6]*energy + free_pars[7]*energy*energy;
+        pars[3] = rmean + legendreSeries(energy, &free_pars[0]);
         pars[4] = omega * free_pars[4];
-        if(pars[3]<0.)pars[3] = 0.;
-        if(pars[3]>1.)pars[3] = 1.;
-        if(pars[4]<0.)pars[4] = 0.;
         return;
     }
     else{
@@ -164,7 +264,7 @@ __device__ void get_yield_pars(bool simuTypeNR, float E_drift, float energy, flo
         float QyLvlhighE = 28.;
       //      if (density > 3.) QyLvlhighE = 49.; Solid Xe effect from Yoo. But,
       //      beware of enabling this line: enriched liquid Xe for neutrinoless
-      //      double beta decay has density higher than 3g/cc;
+      //      float beta decay has density higher than 3g/cc;
         float Qy = QyLvlmedE +
                   (QyLvllowE - QyLvlmedE) /
                       powf(1. + 1.304 * powf(energy, 2.1393), 0.35535) +
@@ -195,11 +295,8 @@ __device__ void get_yield_pars(bool simuTypeNR, float E_drift, float energy, flo
         pars[0] = Wq_eV;
         pars[1] = 1.;
         pars[2] = NexONi;
-        pars[3] = rmean + free_pars[5] + free_pars[6]*energy + free_pars[7]*energy*energy;
+        pars[3] = rmean + legendreSeries(energy, &free_pars[0]);
         pars[4] = omega * free_pars[4];
-        if(pars[3]<0.)pars[3] = 0.;
-        if(pars[3]>1.)pars[3] = 1.;
-        if(pars[4]<0.)pars[4] = 0.;
         return;
     }
 }
@@ -380,10 +477,10 @@ __global__ void signal_simulation(
     
     //float hit_thr = 1.;
     float s1_thr = 2.;
-    //float s2_thr_beforecorrection = 80;
-    //float s2_thr = 80; //s2 threshold in phe
+    float s2b_thr_beforecorrection = 80*0.25;
+    //float s2b_thr = 80*0.25; //s2 threshold in phe
     float s1_max = 120;
-    float s2_max = 20000;
+    //float s2_max = 20000;
     float E_drift = 115.6; //drift electric field in V/cm
     float driftvelocity = 1.2; //in mm/microsecond
     float dt_min = 20;//in ms
@@ -400,6 +497,8 @@ __global__ void signal_simulation(
     float NexONi = pars[2];
     float rmean = pars[3];
     float deltaR = pars[4];
+    if(rmean<0.)return;
+    else if(rmean>1.)return;
 
     //let the simulation begin
 
@@ -420,9 +519,9 @@ __global__ void signal_simulation(
     int Nex = Nq - Ni;
 
     // 5) get recomb fraction fluctuation
-    float r = curand_normal(&s)*deltaR + rmean;
-    if(r >= 1. )r = 1.;
-    else if(r <= 0.)r = 0.;
+    float r = gpu_truncated_gaussian(&s, rmean, deltaR, 0., 1.);
+    if(r<0.)return;
+    else if(r>1.)return;
 
     // 6) get photon and electron numbers
     int Ne = gpu_binomial(&s, Ni, 1 - r);
@@ -471,7 +570,8 @@ __global__ void signal_simulation(
     
     // 16) s2 pulse area, with pmt resolution
     float pulseAreaS2b = curand_normal(&s)*sqrtf(NpheS2b)*sPEres + NpheS2b; 
-    if(pulseAreaS2b <= 0.)pulseAreaS2b = 0.;
+    //if(pulseAreaS2b <= 0.)pulseAreaS2b = 0.;
+    if(pulseAreaS2b < s2b_thr_beforecorrection)return;
 
     // 17) biased s2 pulse area 
     //float biasS2, fluctuationS2;
@@ -484,7 +584,7 @@ __global__ void signal_simulation(
     float InversedS2Correction = get_g2_inverse_correction_factor(dt, eLife_us);
     float pulseAreaS2Corb = pulseAreaS2b * InversedS2Correction;    
     //if(pulseAreaS2Corb <= s2_thr)return;
-    if(pulseAreaS2Corb > s2_max)return;
+    //if(pulseAreaS2Corb < s2b_thr_beforecorrection)return;
 
     weight *= get_s1_tagging_eff(simuTypeNR, pulseAreaS1Cor);
     weight *= get_cs1_qualitycut_eff(pulseAreaS1Cor); 
@@ -535,6 +635,7 @@ __global__ void signal_simulation(
     output[num_trials*1+iteration] = (double)pulseAreaS2Corb;
     output[num_trials*2+iteration] = (double)weight;
     }
+
 }
 }
 

@@ -3,6 +3,8 @@ import matplotlib.pyplot as plt
 import scipy.special
 import random
 
+PATH = '../FittingGPU/outputs/'
+
 nest_avo = 6.0221409e+23
 molar_mass = 131.293
 atom_num = 54.
@@ -40,7 +42,7 @@ def get_yield_pars(energy, free_pars):
             r = 1.
         elif r < 0.:
             r = 0.
-        Ycharge = (1+ deltar/(1-r0)) * Qy
+        Ycharge = (1- r)/(1-r0) * Qy
         Ylight = (Ly + Qy) - Ycharge
         return Ycharge, Ylight
 
@@ -57,6 +59,10 @@ def get_yield_pars(energy, free_pars):
         #inds = np.where((Qy > QyLvllowE)&(energy > 1.)&E_drift > 1e4)[0]
         #Qy[inds] = QyLvllowE  
         Ly = Nq / energy - Qy 
+        inds_l = np.where(Ly<0.)[0]
+        Ly[inds_l] = 0.
+        inds_c = np.where(Qy<0.)[0]
+        Qy[inds_c] = 0.
         Ne = Qy * energy  
         Nph = Ly * energy  
         alpha = 0.067366 + density * 0.039693  
@@ -71,20 +77,20 @@ def get_yield_pars(energy, free_pars):
         inds = np.where((r<0.))[0]
         r[inds] = 0.
 
-        Ycharge = (1+ deltar/(1-r0)) * Qy
+        Ycharge = (1-r)/(1-r0) * Qy
         Ylight = (Ly + Qy) - Ycharge
         return Ycharge, Ylight  
 
 npoints = 50+1
 ndim = 9
 ncov = 2500
-energy = np.linspace(1., 40, npoints)
+energy = np.linspace(1., 27, npoints)
 
 # get walker positions from saved array 
-samples = np.loadtxt("../FittingGPU_9p/outputs/samples.dat")
+samples = np.loadtxt(PATH+'samples.dat')
 samples_orig = samples.reshape(samples.shape[0], samples.shape[1] // ndim, ndim)
-acceptances = np.loadtxt("../FittingGPU_9p/outputs/acceptances.dat")
-lnls = np.loadtxt("../FittingGPU_9p/outputs/lnls.dat")
+acceptances = np.loadtxt(PATH+'acceptances.dat')
+lnls = np.loadtxt(PATH+'lnls.dat')
 inds = np.where((-7476.757684<=lnls[:,-1])&(-2000>=lnls[:,-1]))[0]
 samples_useful = samples_orig[inds,ncov:,:].reshape((-1, ndim))
 samples_useful = samples_useful.tolist()
@@ -121,20 +127,22 @@ light_yield_err_asym = [light_yield_errdown, light_yield_errup]
 ##calculate non_tuned yields##
 position0 = np.zeros(ndim, np.float32)
 cy0, ly0 = get_yield_pars(energy, position0)
-
+#print(get_yield_pars(np.array([10],np.float32), position0))
 ## do plotting ##
 plt.xscale('log')
 fig, axs = plt.subplots(2, 1)
 axs[0].errorbar(energy, light_yield_median, yerr = light_yield_err_asym, color='black', linewidth = 0.1, fmt = '.', label = 'tuned')
 axs[0].plot(energy, ly0, color = 'red', label = 'NESTv2')
 axs[0].set_title('light yield',fontsize=7)
+#axs[0].set_xlabel('energy(keV)',fontsize=7)
 #axs[0].set_xscale('log')
 axs[0].legend()
 
 axs[1].errorbar(energy, charge_yield_median, yerr = light_yield_err_asym, color='black', linewidth = 0.1, fmt = '.', label = 'tuned')
 axs[1].plot(energy, cy0, color = 'red', label = 'NESTv2')
 axs[1].set_title('charge yield',fontsize=7)
+axs[1].set_xlabel('energy(keV)',fontsize=7)
 #axs[1].set_xscale('log')
 axs[1].legend()
 
-fig.savefig("../FittingGPU_9p/outputs/yields.pdf")
+fig.savefig(PATH+'yields.pdf')
