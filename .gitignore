@@ -1,0 +1,8 @@
+*.so
+*.o
+G*
+*~
+\#*
+*.png
+build
+temp
