@@ -72,8 +72,9 @@ for attri,luRange in config['python3.6']['fittingParSpace'].items():
   a = np.asarray(luRange,dtype=np.float32)
   v_variables = np.append(v_variables,a)
 
-best_variable = np.asarray([0.1,4,21.32,0.,0.,0.,1.,27.222],dtype = np.float32)
+best_variable = np.asarray([0.0923185, 3.59445, 6.696541, 0.22419741 , 0.22511, -0.25262 , 1.13235351 , 29.046818],dtype = np.float32)
 v_variables = best_variable 
+print("variable input: ",best_variable)
 
 
 # important step, need to push (or copy) it to GPU memory so that GPU function can use it

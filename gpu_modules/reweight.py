@@ -54,6 +54,15 @@ extern "C" {
 
   }
 
+   __device__ float get_energy_weight(float energy,float *par,int type)
+  {
+    if(type == 3 ) return get_tritium_energy_weight(energy,par);
+    else if(type == 220 ) return 1.;
+    return 0.;
+
+  }
+
+
   __device__ float get_efficiency_FermiDirac(float xx,float *par){
     float eff = 1./(expf(-1.*(xx-par[0])/par[1]) + 1.);
     return eff;
@@ -74,6 +83,12 @@ extern "C" {
 
   __device__ float truncated_normal_ratio(float obs, float mean1, float sigma1, float mean2, float sigma2, float lower, float upper)
   {
+    if(sigma1 == 0. || sigma2 == 0.)
+    {
+      if(sigma1 == sigma2 && mean1 == mean2) return 1.;
+      else return 0.;
+    }
+
     float R = 1.;
     if (obs<lower || obs>upper) return 0;
     // need to calculate the scale factors for trucated gaussian
@@ -87,6 +102,11 @@ extern "C" {
 
   __device__ float normal_ratio(float obs, float mean1, float sigma1, float mean2, float sigma2)
   {
+    if(sigma1 == 0. || sigma2 == 0.)
+    {
+      if(sigma1 == sigma2 && mean1 == mean2) return 1.;
+      else return 0.;
+    }
     double R = 1.;
     R *= double(sigma2) / double(sigma1);
     R *= exp( - 0.5*pow((double(obs) - double(mean1))/double(sigma1), 2.) + 0.5*pow( (double(obs)-double(mean2))/double(sigma2), 2.) );
@@ -94,18 +114,12 @@ extern "C" {
   }
 
 
-//  __device__ float binomial_ratio(int obs, int N, float prob1, float prob2)
-//{
-//    float R = 1.;
-//    R *= powf(prob1/prob2, (float)obs);
-//    R *= powf((1.-prob1)/(1.-prob2), (float)(N - obs));
-//    return R;
-//}
   
   __device__ float binomial_ratio(int obs, int N, float prob1, float prob2)
   {
-    if( float(prob1) == float(prob2) && ( prob2 == float(0.) || prob2 == float(1.)) ) return 1.;
-    else if(prob2 == float(1.) || prob2 == float(0.) || prob1 == 1. || prob1 == 0.) return 0.;
+    if(N<0 || obs <0) return 0.;
+    if( float(prob1) == float(prob2) ) return 1.;
+    else if(prob2 == 1. || prob2 == 0. || prob1 == 1. || prob1 == 0.) return 0.;
 
     if(float(N) * prob2 > 20 && float(N) * (1. - prob2) > 20){
       float sigma_new = sqrtf(float(N) * prob1 * (1. - prob1));
@@ -119,7 +133,6 @@ extern "C" {
     float R = 1.;
     R *= pow(double(prob1)/double(prob2), (double)obs);
     R *= pow((1.-double(prob1))/(1.-double(prob2)), (double)(N - obs));
-    //if( float(prob1) = float(prob2) ) R = double(1.);
     return R;
   }
 
@@ -127,12 +140,12 @@ extern "C" {
   __global__ void ln_likelihood(
       float* xdata, float* ydata, 
       double *histogram2d, double *histogram2d_par,
-      double *lnlikelihood, int* Ndata)
+      double *lnlikelihood, int Ndata)
   {
     int eventId = blockIdx.x * blockDim.x * blockDim.y + threadIdx.y * blockDim.x + threadIdx.x; //start with 1 
     //printf("test i: %d %d",int(*Ndata),eventId);
 
-    //if(eventId > *(Ndata) ) return;
+    if(eventId > (Ndata) ) return;
     float s1 = (float) *(xdata+eventId);
     float s2 = (float) log10(double(*(ydata+eventId)));
 
@@ -199,9 +212,9 @@ extern "C" {
       pars[2] = NexONi;
       pars[3] = rmean ;
       pars[4] = omega ;
-      if(pars[3]<0.)pars[3] = 0.;
-      if(pars[3]>0.9)pars[3] = 0.9;
-      if(pars[4]<0.001)pars[4] = 0.001;
+      //if(pars[3]<0.)pars[3] = 0.;
+      //if(pars[3]>0.9)pars[3] = 0.9;
+      //if(pars[4]<0.001)pars[4] = 0.001;
       return;
     }
     else{
@@ -254,17 +267,54 @@ extern "C" {
       pars[2] = NexONi;
       pars[3] = rmean ;
       pars[4] = omega ;
-      if(pars[3]<0.)pars[3] = 0.;
-      if(pars[3]>0.9)pars[3] = 0.9;
-      if(pars[4]<0.)pars[4] = 0.;
+      //if(pars[3]<0.)pars[3] = 0.;
+      //if(pars[3]>0.9)pars[3] = 0.9;
+      //if(pars[4]<0.)pars[4] = 0.;
       return;
     }
   }
 
+  __global__ void leakage_ratio_calculation(
+  float *e_reweight_x,float *e_reweight_y,
+  float *inTree, float *inTree_par,
+  float *out_weight,float *out_normalization,
+  double *output_par)
+  {
+
+    int iteration = blockIdx.x * blockDim.x * blockDim.y + threadIdx.y * blockDim.x + threadIdx.x;
+    // get the number of trials
+    int num_trials      = (int) *(inTree_par);
+    if (iteration>num_trials) return;
+    int stride_inTree = (int) *(inTree_par+1);
+    float* entry_data = (float*)((char*)inTree + iteration * stride_inTree);
+    float pulseAreaS1Cor = (float) *(entry_data);
+    float pulseAreaS2CorB = (float) *(entry_data + 14);
+    float energy = (float) *(entry_data+20);
+
+    float energy_dRdE = (float) *(out_normalization + iteration);
+
+    float weight =  (float) *(out_weight + iteration);
+    float filledEnergyWeight=interpolate1d(energy,e_reweight_x,e_reweight_y);
+
+    float renormalizationW = 0.;
+    if(weight >= 0. && filledEnergyWeight > 0. && energy_dRdE > 0.) renormalizationW= weight * energy_dRdE / filledEnergyWeight;
+
+    *(out_weight + iteration) = (float) renormalizationW;
+    double check = 1.2328+0.497802*exp(-pulseAreaS1Cor/8.25663)+(-0.00422753*pulseAreaS1Cor);
+    if(pulseAreaS1Cor < 45 && renormalizationW > 0)
+    {
+      if(log10(pulseAreaS2CorB/pulseAreaS1Cor)<check)
+        atomicAdd(output_par,renormalizationW);
+      atomicAdd(output_par+1,renormalizationW);
+    }
+  }
+
+
+
   __global__ void renormalization_reweight(
   float *e_reweight_x,float *e_reweight_y,
   float *inTree, float *inTree_par, 
-  float *out_weight,float *out_normalization,
+  float *out_weight,float *out_normalization,float *out_eff,
   double *output,double *output_par)
   {
      
@@ -278,17 +328,20 @@ extern "C" {
     float pulseAreaS2CorB = (float) *(entry_data + 14);
     float energy = (float) *(entry_data+20);
     
-    float e/Users/danzhang/Downloads/tmp_weight_narrowerSpace_noEff/whole_energy_slice_RecombRatio.pdf nergy_dRdE = (float) *(out_normalization + iteration);
+    float energy_dRdE = (float) *(out_normalization + iteration);
+    float eff = (float) *(out_eff + iteration);
 
     float weight =  (float) *(out_weight + iteration);
     float filledEnergyWeight=interpolate1d(energy,e_reweight_x,e_reweight_y);
     
-    float renormalizationW = weight * energy_dRdE / filledEnergyWeight;
-    //float renormalizationW = weight;
-    if(isnan(renormalizationW) ||isinf(renormalizationW)) 
+    float renormalizationW = 0.;
+    float tot_renormalizationW = 0.;
+    if(weight >= 0. && filledEnergyWeight > 0. && energy_dRdE > 0.) 
     {
-      renormalizationW = 0.;
+      renormalizationW= weight * energy_dRdE * eff / filledEnergyWeight;
+      tot_renormalizationW = weight * energy_dRdE /filledEnergyWeight; 
     }
+    if(isnan(renormalizationW)) printf("check weight %f %f %f \\n",weight,energy_dRdE,filledEnergyWeight);
 
     *(out_weight + iteration) = (float) renormalizationW;
    
@@ -307,45 +360,45 @@ extern "C" {
     double yvalue = (double)log10f(pulseAreaS2CorB);
 
     //printf("I am block%d and thread%d for iteration%d \\n",blockIdx.x, threadIdx.x, iteration);
-    //float* check_2d = (float*)((char*)output + 1 * xBinning * sizeof(float));
-
-    //if(iteration<3 || weight > 5)
-    //{
-    //  printf("iter %d, energy%f, weight %f, renormalizationW %f %f %f %f %f\\n", iteration,energy,weight,renormalizationW, xvalue,yvalue,xMin,yMax);
-    //}
-    if(xvalue>=xMin && xvalue<xMax && yvalue>=yMin && yvalue<yMax)
+    if(tot_renormalizationW > 0.0)
     {
-      int xbin = floorf((xvalue - xMin)/xStep) ;
-      int ybin = floorf((yvalue - yMin)/yStep) ;
-      double* data_address = (double*) ((char*)output + ybin*xBinning * sizeof(double)) + xbin;
-      atomicAdd(data_address,renormalizationW);
-      atomicAdd(output_par,renormalizationW);
+      atomicAdd(output_par+7,tot_renormalizationW);
+      if(xvalue>=xMin && xvalue<xMax && yvalue>=yMin && yvalue<yMax)
+      {
+        int xbin = floorf((xvalue - xMin)/xStep) ;
+        int ybin = floorf((yvalue - yMin)/yStep) ;
+        double* data_address = (double*) ((char*)output + ybin*xBinning * sizeof(double)) + xbin;
+        atomicAdd(data_address,renormalizationW);
+        atomicAdd(output_par,renormalizationW);
 
+      }
     }
- 
-  
+
   }
+
+
+
+
 
   __global__ void main_reweight_fitting(float *new_v_variable,
       float *inTree, float *inTree_par,
-      double *output, double *output_par,
-      float *out_reweight, float *out_normalization,
+      float *const_pars, double *output_par,
+      float *out_reweight, float *out_normalization,float *out_eff,
       int mode)
   {
     // initiate the random sampler, must have.
     int iteration = blockIdx.x * blockDim.x * blockDim.y + threadIdx.y * blockDim.x + threadIdx.x;
     // get the number of trials
+
+
     int num_trials      = (int) *(inTree_par);
-    if (iteration>num_trials) return;
     int stride_inTree = (int) *(inTree_par+1);
     
-    float stepE = (float) *(inTree_par+2);
-    float minE = (float) *(inTree_par+3);
-    float maxE = (float) *(inTree_par+4);
-    //if(iteration<2)
-    //{
-    //  printf("energy: %d %d %f %f %f",num_trials,stride_inTree,stepE,minE,maxE);
-    //}
+    float stepE = (float) const_pars[0];
+    float minE = (float) const_pars[2];
+    float maxE = (float) const_pars[3];
+
+    if (iteration>num_trials) return;
 
     float* entry_data = (float*)((char*)inTree + iteration * stride_inTree);
 
@@ -374,7 +427,7 @@ extern "C" {
     float energy = (float) *(entry_data+20);
     float Nq_actual = (float) *(entry_data+21);
     float Nq = (float) *(entry_data+22);
-    int effectiveSimuAccept = (int) *(entry_data+23);
+    float TotalAcceptance = (float) *(entry_data+23);
 
 
 
@@ -388,24 +441,31 @@ extern "C" {
     float p0FlucRecomb_new = (float) *(new_v_variable+6);
     float flatE_new = (float) *(new_v_variable+7);
     
-    float P_dphe = 0.21; //probab that 1 phd makes 2nd phe
+    bool simuTypeNR = bool(const_pars[1]);
+    int energyType = int(const_pars[10]);
+    float E_drift = const_pars[13]; //drift electric field in V/cm
+    float P_dphe = const_pars[12]; //probab that 1 phd makes 2nd phe
+    float density = 2.8611; //density of liquid xenon
+
+    //if(iteration<2)
+    //{
+    //  printf("energy: %d %d %f %f %f\\n",num_trials,stride_inTree,E_drift,P_dphe,flatE_new);
+    //}
     float g1_new = G1_new / (1. + P_dphe);
     float eee_new = g2b_new / seg_new;
     float par_e[]={flatE_new};
-    float energy_weight_new = get_tritium_energy_weight(energy,par_e);
-    if(energy_weight_new < 0.)energy_weight_new =0.;
+    float energy_weight_new = get_energy_weight(energy,par_e,energyType);
+    if(energy_weight_new < 0. || isnan(energy_weight_new))energy_weight_new =0.;
     
     float pars[5]={0};
 
-    float E_drift = 115.6; //drift electric field in V/cm
-    float density = 2.8611; //density of liquid xenon
-    bool simuTypeNR = false;
 
     get_yield_pars(simuTypeNR, E_drift, energy, density, &pars[0]);
     float L_new = pars[1];//lindhard factor
     float fittingRmean[] = {maxE,p0Recomb_new,p1Recomb_new,p2Recomb_new};
     float rmean_new = pars[3] + legendreSeries(energy,&fittingRmean[0]);
     float deltaR_new = pars[4] * p0FlucRecomb_new;
+
     bool debug = false;
     if(debug)
     {
@@ -421,63 +481,51 @@ extern "C" {
     double ReweightingWeight = 1.;
     ReweightingWeight *= (double) binomial_ratio(Nq, Nq_actual, L_new,L);
     double r1 = (double) truncated_normal_ratio(r,rmean_new,deltaR_new,rmean,deltaR,0.,1.);
+    //double r1 = (double) normal_ratio(r,rmean_new,deltaR_new,rmean,deltaR);
     //double r2 = (double) binomial_ratio(int(pulseAreaS2CorB),int(pulseAreaS2Cor),bottom_fraction_new,bottom_fraction);
     double r3 = (double) binomial_ratio(int(nHitsS1), int(Nph), g1_true_new, g1_true);
-    double r4 = (double) binomial_ratio(int(Nee), int(Ne), exp(-double(dt) / double(eLife_us)) * double(eee_new),exp(-double(dt) / double(eLife_us)) * double(eee));
+    double r4 = (double) binomial_ratio(int(Nee), int(Ne), expf(-dt / eLife_us) * eee_new,expf(-dt / eLife_us) * eee);
     double r5 = (double) normal_ratio(nHitsS2, double(seg_new) * double(Nee), sqrt(double(seg_new) * double(Nee)), double(seg) * double(Nee), sqrt(double(seg) * double(Nee)));
     ReweightingWeight *= double(r1 *  r3 * r4 * r5);
     //ReweightingWeight *= r1 ;
 
-    float TotalAcceptance = 1.;
-    int s1s2RangeAccept = 1.;
-    if ( int(nHitsS1) <= 1 ||  pulseAreaS2CorB <= 0. || pulseAreaS1Cor < 2 )
+    if(isnan(ReweightingWeight) || isinf(ReweightingWeight)) 
     {
-      s1s2RangeAccept = 0.;
-
+      ReweightingWeight = 0.;
+      //printf("test weight %f %f %f %f",r1, r3, r4, r5);
+      //printf("%d: r, energy, rmean, deltaR,rmean_new,deltaR_new,r1: %f %f %f %f %f %f %f\\n",iteration,r,energy,rmean,deltaR,rmean_new,deltaR_new,r1);
     }
-
-
-    //if (iteration < int(10) )
-    //{
-    //    printf("ori: g1, eee, seg, reweighting: %.2f, %.2f, %.2f, %.2f %f %f %f %f\\n",g1,eee,seg,ReweightingWeight, r1,r3,r4,r5);
-    //}
-
+//    if (iteration < int(10000) && r < 0.15 && energy < 1.4 && ReweightingWeight > 0.0)
+//    {
+//        printf("ori: g1, eee, seg, reweighting: %.2f, %.2f, %.2f, %f %f %f %f %f %f\\n",g1,eee,seg,ReweightingWeight, r1,r3,r4,r5,double(r1*r3*r4*r5));
+//    }
+//
     
 
-    if(isnan(ReweightingWeight) ||isinf(ReweightingWeight) || ReweightingWeight <= 0.) 
-    {
-      
-      //effectiveSimuAccept = 0.;
-      ReweightingWeight = 0;
-
-    }
-    //int offsetCheck =1000;
-    //if(iteration >200 + offsetCheck && iteration <300 + offsetCheck)
-    //if(ReweightingWeight>10.)
-    //{
-    //  printf("i %d,  r1 %f,  r2 %f,  r3 %f, r4 %f, r5 %f\\n",iteration, r1 ,r2 , r3, r4, r5);
-    //  printf("i %d, %f, %f, %f, %f, %f, %f\\n",iteration, nHitsS1, Nph, g1_true_new, g1_true, r3, ReweightingWeight);
-    //
-    //}
 
     float eff = 1.;
     
     //s1_eff for tritium
-    float par_s1_eff[]={-1.25,4.2255};
+    float par_s1_eff[]={float(const_pars[4]),float(const_pars[5])};
     eff *= get_efficiency_FermiDirac(pulseAreaS1Cor,&par_s1_eff[0]);
+    
+    float par_s1tag_eff[]={float(const_pars[6]),float(const_pars[7])};
+    eff *= get_efficiency_FermiDirac(pulseAreaS1Cor,&par_s1tag_eff[0]);
 
-    float par_s2b_eff[]={162.466,93.368};
+    float par_s2b_eff[]={float(const_pars[8]),float(const_pars[9])};
     eff *= get_efficiency_FermiDirac(pulseAreaS2CorB,&par_s2b_eff[0]);
+    if(isnan(eff)||isinf(eff)) eff = 0.;
 
-    double new_weight = ReweightingWeight;
+
     if(mode == 1 )
     {
 
       *(out_reweight + iteration ) = (float)  ReweightingWeight;
-      TotalAcceptance = float(effectiveSimuAccept) * s1s2RangeAccept;
-      *(out_normalization+iteration) =  (float) energy_weight_new * TotalAcceptance * eff; 
-      //*(out_normalization+iteration) =  (float) energy_weight_new * TotalAcceptance; 
-      
+      *(out_normalization+iteration) =  (float) energy_weight_new; 
+      *(out_eff+iteration) =  (float)  TotalAcceptance * eff; 
+      float test = (float) energy_weight_new * TotalAcceptance * eff;
+      if(isnan(test) )printf("check %d %f %f %f %f",iteration,energy_weight_new,TotalAcceptance,ReweightingWeight,eff);
+      //*(out_normalization+iteration) =  (float) energy_weight_new * eff;
       //fill reweight energy spec
       int offSetE = 7;
       if (energy>=minE && energy <=maxE ) 
@@ -485,41 +533,10 @@ extern "C" {
         int binOfE = floorf((energy - minE)/stepE);
         double* e_address = (double*) ((char*)output_par + ( offSetE + binOfE) * sizeof(double));
         atomicAdd(e_address, ReweightingWeight); 
+        atomicAdd(output_par, ReweightingWeight);
       }
+      //if (iteration == num_trials )printf("catch %f",ReweightingWeight);
     }
-    
-
-    //filling ouput 2d histogram
-    //int xBinning = (int)*(output_par+1);
-    //double xMin = (double)*(output_par+2);
-    //double xMax = (double)*(output_par+3);
-    //double xStep = (xMax - xMin)/(double)xBinning;
-    //int yBinning = (int)*(output_par+4);
-    //double yMin = (double)*(output_par+5);
-    //double yMax = (double)*(output_par+6);
-    //double yStep = (yMax - yMin)/(double)yBinning;
-
-    ////get values, overflows and underflows in output[1]-output[9]
-    //double xvalue = (double)pulseAreaS1Cor;
-    //double yvalue = (double)log10f(pulseAreaS2CorB);
-
-    ////printf("I am block%d and thread%d for iteration%d \\n",blockIdx.x, threadIdx.x, iteration);
-    ////float* check_2d = (float*)((char*)output + 1 * xBinning * sizeof(float));
-    ////if (iteration < int(10) )
-    ////{
-    ////    printf("ori: g1, eee, seg, reweighting: %.2f, %.2f, %.2f, %.2f %f\\n",g1,eee,seg,ReweightingWeight, (float) *(check_2d));
-    ////}
-
-
-    //if(xvalue>=xMin && xvalue<xMax && yvalue>=yMin && yvalue<yMax)
-    //{
-    //  int xbin = floorf((xvalue - xMin)/xStep) ;
-    //  int ybin = floorf((yvalue - yMin)/yStep) ;
-    //  double* data_address = (double*) ((char*)output + ybin*xBinning * sizeof(double)) + xbin * sizeof(double);
-    //  atomicAdd(data_address,new_weight);
-    //  atomicAdd(output_par,new_weight);
-
-    //}
 
 
 
